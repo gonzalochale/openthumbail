@@ -1,52 +1,52 @@
+"use client";
+
+import { Download } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Button } from "@/components/ui/button";
+import { useThumbnailStore } from "@/store/use-thumbnail-store";
+import { useShallow } from "zustand/react/shallow";
 
-interface PreviewProps {
-  imageBase64: string | null;
-  enhancedPrompt: string | null;
-  loading: boolean;
-}
+export function Preview() {
+  const { versions, selectedVersionId, loading, download } = useThumbnailStore(
+    useShallow((s) => ({
+      versions: s.versions,
+      selectedVersionId: s.selectedVersionId,
+      loading: s.loading,
+      download: s.download,
+    })),
+  );
 
-export function Preview({
-  imageBase64,
-  enhancedPrompt,
-  loading,
-}: PreviewProps) {
+  const selectedVersion = versions.find((v) => v.id === selectedVersionId);
+  const isFirstLoad = versions.length === 0 && loading;
+
   return (
-    <div className="w-full flex-1 flex items-center justify-center">
-      <div className="w-full max-w-3xl">
+    <div className="w-full flex-1 flex flex-col items-center justify-center gap-2">
+      <div className="w-full max-w-4xl">
         <div className="relative w-full" style={{ aspectRatio: "16/9" }}>
-          {loading && <Skeleton className="absolute inset-0 rounded-lg" />}
-
-          {imageBase64 && !loading && (
+          {isFirstLoad && <Skeleton className="absolute inset-0 rounded-lg" />}
+          {selectedVersion && (
             <img
-              src={`data:image/png;base64,${imageBase64}`}
-              alt="Generated thumbnail"
+              src={`data:${selectedVersion.mimeType};base64,${selectedVersion.imageBase64}`}
+              alt={`Thumbnail v${selectedVersion.id}`}
               className="w-full h-full object-cover rounded-lg"
             />
           )}
-
-          {!imageBase64 && !loading && (
-            <div className="absolute inset-0 rounded-lg border border-dashed flex items-center justify-center text-muted-foreground text-sm">
-              Thumbnail preview will appear here
-            </div>
-          )}
         </div>
-
-        {imageBase64 && (
-          <p className="text-xs text-muted-foreground text-center mt-2">
-            1920 × 1080 · PNG
-          </p>
-        )}
-
-        {enhancedPrompt && (
-          <details className="mt-4 text-xs text-muted-foreground">
-            <summary className="cursor-pointer select-none font-medium text-foreground/70 hover:text-foreground transition-colors">
-              Enhanced prompt
-            </summary>
-            <p className="mt-2 leading-relaxed whitespace-pre-wrap">
-              {enhancedPrompt}
+        {selectedVersion && (
+          <div className="flex items-center justify-between mt-2">
+            <p className="text-xs text-muted-foreground">
+              v{selectedVersion.id}
             </p>
-          </details>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => download(selectedVersion.id)}
+              className="gap-1.5"
+            >
+              <Download size={14} />
+              Download
+            </Button>
+          </div>
         )}
       </div>
     </div>

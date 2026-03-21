@@ -2,6 +2,8 @@ import { generateImage, generateText, Output } from "ai";
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { z } from "zod";
 import { whitePng } from "@/lib/white-png";
+import { auth } from "@/lib/auth";
+import { headers } from "next/headers";
 
 const THUMBNAIL_SYSTEM_PROMPT = `
 Safety check (MANDATORY)
@@ -38,6 +40,11 @@ interface ReferenceImage {
 }
 
 export async function POST(req: Request) {
+  const session = await auth.api.getSession({ headers: await headers() });
+  if (!session) {
+    return Response.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
   const body = await req.json();
   const { prompt, previousVersion, referenceImages } = body as {
     prompt: string;

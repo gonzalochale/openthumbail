@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ArrowUp, Paperclip, X } from "lucide-react";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { useThumbnailStore } from "@/store/use-thumbnail-store";
@@ -22,48 +22,25 @@ import {
   FileUploadTrigger,
   FileUploadContent,
 } from "@/components/file-upload";
-
-const MAX_FILES = 5;
-const MAX_REFERENCE_PX = 512;
-
-function resizeAndToBase64(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const img = new Image();
-    const url = URL.createObjectURL(file);
-    img.onload = () => {
-      URL.revokeObjectURL(url);
-      const scale = Math.min(
-        1,
-        MAX_REFERENCE_PX / Math.max(img.width, img.height),
-      );
-      const canvas = document.createElement("canvas");
-      canvas.width = Math.round(img.width * scale);
-      canvas.height = Math.round(img.height * scale);
-      canvas
-        .getContext("2d")!
-        .drawImage(img, 0, 0, canvas.width, canvas.height);
-      resolve(canvas.toDataURL("image/jpeg", 0.85).split(",")[1]);
-    };
-    img.onerror = () => {
-      URL.revokeObjectURL(url);
-      reject(new Error("Failed to load image"));
-    };
-    img.src = url;
-  });
-}
-
-function formatFileSize(bytes: number): string {
-  return bytes < 1024 * 1024
-    ? `${(bytes / 1024).toFixed(1)} KB`
-    : `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
+import { authClient } from "@/lib/auth-client";
+import { AuthModal } from "@/components/auth-modal";
+import { resizeAndToBase64, formatFileSize } from "@/lib/utils";
+import { MAX_FILES } from "@/lib/constants";
 
 type FileEntry = { file: File; url: string };
 
 export function GeneratePrompt() {
   const [prompt, setPrompt] = useState("");
   const [fileEntries, setFileEntries] = useState<FileEntry[]>([]);
+  const [authModalOpen, setAuthModalOpen] = useState(false);
+  const [pendingPrompt] = useState<string | null>(() => {
+    const p = sessionStorage.getItem("pending-prompt");
+    if (p) sessionStorage.removeItem("pending-prompt");
+    return p;
+  });
+  const pendingActionRef = useRef<"submit" | "attach" | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const { data: session, isPending: sessionPending } = authClient.useSession();
   const {
     versions,
     selectedVersionId,
@@ -83,6 +60,11 @@ export function GeneratePrompt() {
   );
 
   function addFiles(newFiles: File[]) {
+    if (!session) {
+      pendingActionRef.current = "attach";
+      setAuthModalOpen(true);
+      return;
+    }
     const remaining = MAX_FILES - fileEntries.length;
     if (remaining <= 0) {
       toast("You can only attach up to 5 images");
@@ -106,58 +88,87 @@ export function GeneratePrompt() {
     });
   }
 
-  async function handleSubmit() {
-    if ((!prompt.trim() && fileEntries.length === 0) || loading) return;
-    const trimmed = prompt.trim();
-    const entriesToSubmit = fileEntries;
-    setPrompt("");
-    setFileEntries([]);
-    entriesToSubmit.forEach((e) => URL.revokeObjectURL(e.url));
-    startGenerating();
+  const doSubmit = useCallback(
+    async (promptValue: string) => {
+      if ((!promptValue.trim() && fileEntries.length === 0) || loading) return;
+      const trimmed = promptValue.trim();
+      const entriesToSubmit = fileEntries;
+      setPrompt("");
+      setFileEntries([]);
+      entriesToSubmit.forEach((e) => URL.revokeObjectURL(e.url));
+      startGenerating();
 
-    const previousVersion = versions.find((v) => v.id === selectedVersionId);
+      const previousVersion = versions.find((v) => v.id === selectedVersionId);
 
-    try {
-      const referenceImages = await Promise.all(
-        entriesToSubmit.map(async ({ file }) => ({
-          imageBase64: await resizeAndToBase64(file),
-          mimeType: "image/jpeg",
-        })),
-      );
+      try {
+        const referenceImages = await Promise.all(
+          entriesToSubmit.map(async ({ file }) => ({
+            imageBase64: await resizeAndToBase64(file),
+            mimeType: "image/jpeg",
+          })),
+        );
 
-      const res = await fetch("/api/generate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
+        const res = await fetch("/api/generate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            prompt: trimmed,
+            previousVersion: previousVersion
+              ? {
+                  imageBase64: previousVersion.imageBase64,
+                  mimeType: previousVersion.mimeType,
+                  enhancedPrompt: previousVersion.enhancedPrompt,
+                }
+              : undefined,
+            referenceImages:
+              referenceImages.length > 0 ? referenceImages : undefined,
+          }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error ?? "Unknown error");
+
+        addVersion({
+          imageBase64: data.image,
+          mimeType: data.mimeType,
+          enhancedPrompt: data.enhancedPrompt ?? null,
           prompt: trimmed,
-          previousVersion: previousVersion
-            ? {
-                imageBase64: previousVersion.imageBase64,
-                mimeType: previousVersion.mimeType,
-                enhancedPrompt: previousVersion.enhancedPrompt,
-              }
-            : undefined,
-          referenceImages:
-            referenceImages.length > 0 ? referenceImages : undefined,
-        }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? "Unknown error");
+          createdAt: Date.now(),
+        });
+      } catch (err) {
+        toast(err instanceof Error ? err.message : "Something went wrong");
+        setLoading(false);
+      } finally {
+        requestAnimationFrame(() => textareaRef.current?.focus());
+      }
+    },
+    [
+      fileEntries,
+      loading,
+      versions,
+      selectedVersionId,
+      startGenerating,
+      addVersion,
+      setLoading,
+    ],
+  );
 
-      addVersion({
-        imageBase64: data.image,
-        mimeType: data.mimeType,
-        enhancedPrompt: data.enhancedPrompt ?? null,
-        prompt: trimmed,
-        createdAt: Date.now(),
-      });
-    } catch (err) {
-      toast(err instanceof Error ? err.message : "Something went wrong");
-      setLoading(false);
-    } finally {
-      requestAnimationFrame(() => textareaRef.current?.focus());
+  const handleSubmit = useCallback(async () => {
+    if ((!prompt.trim() && fileEntries.length === 0) || loading) return;
+    if (!session) {
+      if (prompt.trim()) {
+        sessionStorage.setItem("pending-prompt", prompt.trim());
+      }
+      setAuthModalOpen(true);
+      return;
     }
-  }
+    doSubmit(prompt);
+  }, [prompt, fileEntries, loading, session, doSubmit]);
+
+  useEffect(() => {
+    if (sessionPending || !session || !pendingPrompt) return;
+    setPrompt(pendingPrompt);
+    doSubmit(pendingPrompt);
+  }, [sessionPending, session, pendingPrompt, doSubmit]);
 
   function handlePaste(e: React.ClipboardEvent) {
     const imageFiles = Array.from(e.clipboardData.items)
@@ -230,15 +241,31 @@ export function GeneratePrompt() {
               <Tooltip>
                 <TooltipTrigger
                   render={
-                    <FileUploadTrigger
-                      className={buttonVariants({
-                        variant: "ghost",
-                        size: "icon-lg",
-                      })}
-                      disabled={loading}
-                    >
-                      <Paperclip className="size-4" />
-                    </FileUploadTrigger>
+                    session ? (
+                      <FileUploadTrigger
+                        className={buttonVariants({
+                          variant: "ghost",
+                          size: "icon-lg",
+                        })}
+                        disabled={loading}
+                      >
+                        <Paperclip className="size-4" />
+                      </FileUploadTrigger>
+                    ) : (
+                      <button
+                        type="button"
+                        className={buttonVariants({
+                          variant: "ghost",
+                          size: "icon-lg",
+                        })}
+                        onClick={() => {
+                          pendingActionRef.current = "attach";
+                          setAuthModalOpen(true);
+                        }}
+                      >
+                        <Paperclip className="size-4" />
+                      </button>
+                    )
                   }
                 />
                 <TooltipContent>Attach image</TooltipContent>
@@ -267,6 +294,7 @@ export function GeneratePrompt() {
           </FileUploadContent>
         </FileUpload>
       </div>
+      <AuthModal open={authModalOpen} onOpenChange={setAuthModalOpen} />
     </div>
   );
 }

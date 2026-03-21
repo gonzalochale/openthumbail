@@ -33,11 +33,6 @@ export function GeneratePrompt() {
   const [prompt, setPrompt] = useState("");
   const [fileEntries, setFileEntries] = useState<FileEntry[]>([]);
   const [authModalOpen, setAuthModalOpen] = useState(false);
-  const [pendingPrompt] = useState<string | null>(() => {
-    const p = sessionStorage.getItem("pending-prompt");
-    if (p) sessionStorage.removeItem("pending-prompt");
-    return p;
-  });
   const pendingActionRef = useRef<"submit" | "attach" | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const { data: session, isPending: sessionPending } = authClient.useSession();
@@ -48,6 +43,8 @@ export function GeneratePrompt() {
     setLoading,
     startGenerating,
     addVersion,
+    pendingPrompt,
+    setPendingPrompt,
   } = useThumbnailStore(
     useShallow((s) => ({
       versions: s.versions,
@@ -56,6 +53,8 @@ export function GeneratePrompt() {
       setLoading: s.setLoading,
       startGenerating: s.startGenerating,
       addVersion: s.addVersion,
+      pendingPrompt: s.pendingPrompt,
+      setPendingPrompt: s.setPendingPrompt,
     })),
   );
 
@@ -155,20 +154,19 @@ export function GeneratePrompt() {
   const handleSubmit = useCallback(async () => {
     if ((!prompt.trim() && fileEntries.length === 0) || loading) return;
     if (!session) {
-      if (prompt.trim()) {
-        sessionStorage.setItem("pending-prompt", prompt.trim());
-      }
+      if (prompt.trim()) setPendingPrompt(prompt.trim());
       setAuthModalOpen(true);
       return;
     }
     doSubmit(prompt);
-  }, [prompt, fileEntries, loading, session, doSubmit]);
+  }, [prompt, fileEntries, loading, session, setPendingPrompt, doSubmit]);
 
   useEffect(() => {
     if (sessionPending || !session || !pendingPrompt) return;
+    setPendingPrompt(null);
     setPrompt(pendingPrompt);
     doSubmit(pendingPrompt);
-  }, [sessionPending, session, pendingPrompt, doSubmit]);
+  }, [sessionPending, session, pendingPrompt, setPendingPrompt, doSubmit]);
 
   function handlePaste(e: React.ClipboardEvent) {
     const imageFiles = Array.from(e.clipboardData.items)

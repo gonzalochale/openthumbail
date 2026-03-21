@@ -65,7 +65,7 @@ export async function POST(req: Request) {
     if (!CREATE_IMAGES) {
       await new Promise((r) => setTimeout(r, 5000));
       return Response.json({
-        image: whitePng(1280, 720),
+        image: whitePng(2560, 1440),
         mimeType: "image/png",
         enhancedPrompt: prompt,
       });
@@ -138,6 +138,14 @@ export async function POST(req: Request) {
       model: google.image(IMAGE_MODEL),
       prompt: imagePrompt,
       aspectRatio: "16:9",
+      providerOptions: {
+        google: {
+          imageConfig: {
+            aspectRatio: "16:9",
+            imageSize: "2K",
+          },
+        },
+      },
     });
 
     return Response.json({

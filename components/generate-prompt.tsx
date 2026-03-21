@@ -199,7 +199,11 @@ export function GeneratePrompt() {
         <FileUpload onFilesAdded={addFiles} accept="image/*" disabled={loading}>
           <PromptInput
             value={prompt}
-            onValueChange={setPrompt}
+            onValueChange={(value) => {
+              setPrompt(value);
+              if (pendingPrompt !== null)
+                setPendingPrompt(value.trim() || null);
+            }}
             onSubmit={handleSubmit}
             onPaste={handlePaste}
             isLoading={loading}

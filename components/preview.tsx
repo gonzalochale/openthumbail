@@ -3,7 +3,7 @@
 import { Skeleton } from "@/components/ui/skeleton";
 import { useThumbnailStore } from "@/store/use-thumbnail-store";
 import { useShallow } from "zustand/react/shallow";
-import { PreviewActions } from "./preview-actions";
+import { PreviewActions } from "@/components/preview-actions";
 import { AnimatePresence, motion } from "motion/react";
 
 export function Preview() {

@@ -6,15 +6,20 @@ import { useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { useThumbnailStore } from "@/store/use-thumbnail-store";
 import { useShallow } from "zustand/react/shallow";
-import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components//ui/tooltip";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
-} from "./ui/dropdown-menu";
-import { TextShimmer } from "./ui/text-shimmer";
-import { TextLoop } from "./ui/text-loop";
+} from "@/components/ui/dropdown-menu";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { TextShimmer } from "@/components//ui/text-shimmer";
+import { TextLoop } from "@/components//ui/text-loop";
 
 const GENERATING_PHRASES = [
   "Adjusting details...",
@@ -133,20 +138,29 @@ export function PreviewActions() {
                 >
                   v{selectedVersion!.id}
                 </DropdownMenuTrigger>
-                <DropdownMenuContent
-                  align="start"
-                  className="w-32 max-h-50 overflow-y-auto"
-                >
-                  {[...versions].reverse().map((v) => (
-                    <DropdownMenuItem
-                      key={v.id}
-                      onClick={() => selectVersion(v.id)}
-                      className="font-mono justify-between"
-                    >
-                      v{v.id}
-                      {v.id === selectedVersionId && <Check data-icon />}
-                    </DropdownMenuItem>
-                  ))}
+                <DropdownMenuContent align="start" className="w-32 p-0">
+                  <ScrollArea
+                    className="max-h-40"
+                    scrollbarClassName="data-vertical:w-2"
+                  >
+                    <div className="p-1">
+                      {[...versions].reverse().map((v) => (
+                        <DropdownMenuItem
+                          key={v.id}
+                          ref={
+                            v.id === selectedVersionId
+                              ? (el) => el?.scrollIntoView({ block: "nearest" })
+                              : undefined
+                          }
+                          onClick={() => selectVersion(v.id)}
+                          className="font-mono justify-between"
+                        >
+                          v{v.id}
+                          {v.id === selectedVersionId && <Check data-icon />}
+                        </DropdownMenuItem>
+                      ))}
+                    </div>
+                  </ScrollArea>
                 </DropdownMenuContent>
               </DropdownMenu>
             </motion.div>

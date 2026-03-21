@@ -1,8 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { ArrowUp, Loader2 } from "lucide-react";
-import { motion, AnimatePresence } from "motion/react";
+import { ArrowUp } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useThumbnailStore } from "@/store/use-thumbnail-store";
 import { useShallow } from "zustand/react/shallow";
@@ -17,11 +16,12 @@ import {
 export function GeneratePrompt() {
   const [prompt, setPrompt] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const { versions, loading, setLoading, addVersion } = useThumbnailStore(
+  const { versions, loading, setLoading, startGenerating, addVersion } = useThumbnailStore(
     useShallow((s) => ({
       versions: s.versions,
       loading: s.loading,
       setLoading: s.setLoading,
+      startGenerating: s.startGenerating,
       addVersion: s.addVersion,
     })),
   );
@@ -30,7 +30,7 @@ export function GeneratePrompt() {
     if (!prompt.trim() || loading) return;
     const trimmed = prompt.trim();
     setPrompt("");
-    setLoading(true);
+    startGenerating();
 
     const previousVersion = versions.length > 0 ? versions.at(-1) : undefined;
 
@@ -61,8 +61,8 @@ export function GeneratePrompt() {
       });
     } catch (err) {
       toast(err instanceof Error ? err.message : "Something went wrong");
-    } finally {
       setLoading(false);
+    } finally {
       requestAnimationFrame(() => textareaRef.current?.focus());
     }
   }
@@ -90,29 +90,7 @@ export function GeneratePrompt() {
                 disabled={loading || !prompt.trim()}
                 size="icon-lg"
               >
-                <AnimatePresence mode="popLayout" initial={false}>
-                  {loading ? (
-                    <motion.span
-                      key="loading"
-                      initial={{ opacity: 0, scale: 0.5, rotate: -90 }}
-                      animate={{ opacity: 1, scale: 1, rotate: 0 }}
-                      exit={{ opacity: 0, scale: 0.5, rotate: 90 }}
-                      transition={{ duration: 0.18, ease: [0.25, 1, 0.5, 1] }}
-                    >
-                      <Loader2 size={18} className="animate-spin" />
-                    </motion.span>
-                  ) : (
-                    <motion.span
-                      key="send"
-                      initial={{ opacity: 0, scale: 0.5, rotate: 90 }}
-                      animate={{ opacity: 1, scale: 1, rotate: 0 }}
-                      exit={{ opacity: 0, scale: 0.5, rotate: -90 }}
-                      transition={{ duration: 0.18, ease: [0.25, 1, 0.5, 1] }}
-                    >
-                      <ArrowUp size={18} />
-                    </motion.span>
-                  )}
-                </AnimatePresence>
+                <ArrowUp size={18} />
               </Button>
             </PromptInputAction>
           </PromptInputActions>

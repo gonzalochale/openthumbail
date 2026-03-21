@@ -52,7 +52,7 @@ export async function POST(req: Request) {
 
   try {
     if (!CREATE_IMAGES) {
-      await new Promise((r) => setTimeout(r, 800));
+      await new Promise((r) => setTimeout(r, 5000));
       return Response.json({
         image: whitePng(1280, 720),
         mimeType: "image/png",

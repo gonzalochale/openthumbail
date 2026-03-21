@@ -18,7 +18,7 @@ export function Preview() {
   const selectedVersion = versions.find((v) => v.id === selectedVersionId);
 
   return (
-    <div className="w-full flex-1 flex flex-col items-center justify-center gap-2">
+    <div className="w-full max-w-5xl flex-1 flex flex-col items-center justify-center gap-2">
       <PreviewActions />
       <div
         className="relative w-full overflow-hidden rounded-lg sm:rounded-2xl"

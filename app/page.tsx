@@ -5,7 +5,7 @@ import { PaymentReturnHandler } from "@/components/payment-return-handler";
 
 export default function Home() {
   return (
-    <main className="w-full max-w-5xl mx-auto h-svh flex flex-col justify-center items-center p-5 pb-52">
+    <main className="relative w-full max-w-360 mx-auto h-svh flex flex-col justify-center items-center p-5 pb-24">
       <UserMenu />
       <Preview />
       <GeneratePrompt />

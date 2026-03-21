@@ -55,7 +55,7 @@ export type PromptInputProps = {
 function PromptInput({
   className,
   isLoading = false,
-  maxHeight = 120,
+  maxHeight = 150,
   value,
   onValueChange,
   onSubmit,
@@ -93,7 +93,7 @@ function PromptInput({
         <div
           onClick={handleClick}
           className={cn(
-            "border-input cursor-text rounded-2xl border p-2 bg-card",
+            "border-input cursor-text rounded-t-2xl sm:rounded-2xl border p-2 bg-card",
             disabled && "cursor-not-allowed opacity-60",
             className,
           )}
@@ -175,7 +175,7 @@ const PromptInputTextarea = React.forwardRef<
       onChange={handleChange}
       onKeyDown={handleKeyDown}
       className={cn(
-        "text-primary text-base min-h-11 w-full resize-none border-none bg-transparent dark:bg-transparent shadow-none outline-none focus-visible:ring-0 focus-visible:ring-offset-0 [scrollbar-color:var(--border)_transparent]",
+        "text-primary text-base min-h-28 sm:min-h-11 w-full resize-none border-none bg-transparent dark:bg-transparent shadow-none outline-none focus-visible:ring-0 focus-visible:ring-offset-0 [scrollbar-color:var(--border)_transparent]",
         className,
       )}
       rows={1}

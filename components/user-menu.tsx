@@ -1,14 +1,13 @@
 "use client";
 
 import { useState } from "react";
-import { LogOut } from "lucide-react";
+import { LogOut, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { authClient } from "@/lib/auth-client";
 import { AnimatePresence, LayoutGroup, motion } from "motion/react";
 import { useCredits } from "@/hooks/use-credits";
@@ -37,9 +36,9 @@ export function UserMenu() {
     duration: 0.6,
   } as const;
   const motionProps = {
-    initial: { opacity: 0, scale: 0.9, filter: "blur(5px)" },
-    animate: { opacity: 1, scale: 1, filter: "blur(0px)" },
-    exit: { opacity: 0, scale: 0.9, filter: "blur(5px)" },
+    initial: { opacity: 0, filter: "blur(5px)" },
+    animate: { opacity: 1, filter: "blur(0px)" },
+    exit: { opacity: 0, filter: "blur(5px)" },
     transition: springTransition,
   };
 
@@ -49,7 +48,7 @@ export function UserMenu() {
         {!isPending && !session && (
           <motion.header
             key="unauthenticated"
-            className="w-full flex items-center justify-center"
+            className="w-full flex items-center justify-end"
             {...motionProps}
           >
             <GitHubSignInButton />
@@ -59,7 +58,7 @@ export function UserMenu() {
           <LayoutGroup key="authenticated">
             <motion.header
               layout
-              className="w-full flex items-center justify-center gap-2"
+              className="w-full flex items-center justify-end gap-2"
               {...motionProps}
               transition={{
                 layout: springTransition,
@@ -67,26 +66,13 @@ export function UserMenu() {
               }}
             >
               <motion.div layout transition={springTransition}>
-                <Avatar>
-                  <AvatarImage
-                    src={session.user.image ?? undefined}
-                    alt={session.user.name ?? ""}
-                  />
-                  <AvatarFallback>
-                    {(session.user.name ?? session.user.email ?? "U")
-                      .charAt(0)
-                      .toUpperCase()}
-                  </AvatarFallback>
-                </Avatar>
-              </motion.div>
-              <motion.div layout transition={springTransition}>
                 <Tooltip>
                   <TooltipTrigger
                     render={
                       <Button
-                        variant="outline"
+                        variant="secondary"
                         size="lg"
-                        className="min-w-24 justify-between"
+                        className="min-w-24 justify-between gap-5"
                         onClick={() => setCreditsOpen(true)}
                       >
                         Credits

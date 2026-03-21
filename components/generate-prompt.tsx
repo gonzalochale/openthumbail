@@ -194,8 +194,8 @@ export function GeneratePrompt() {
       : "Create a thumbnail for my YouTube video with the title...";
 
   return (
-    <div className="fixed bottom-0 left-0 right-0 flex justify-center pb-10 sm:pb-20 px-5 pointer-events-none">
-      <div className="w-full max-w-2xl pointer-events-auto">
+    <div className="absolute bottom-0 sm:bottom-5 sm:px-5 w-full flex justify-center pointer-events-none">
+      <div className="mx-auto w-full max-w-2xl pointer-events-auto">
         <FileUpload onFilesAdded={addFiles} accept="image/*" disabled={loading}>
           <PromptInput
             value={prompt}

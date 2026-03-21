@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { ArrowUp, Loader2 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { Button } from "@/components/ui/button";
@@ -16,6 +16,7 @@ import {
 
 export function GeneratePrompt() {
   const [prompt, setPrompt] = useState("");
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
   const { versions, loading, setLoading, addVersion } = useThumbnailStore(
     useShallow((s) => ({
       versions: s.versions,
@@ -62,6 +63,7 @@ export function GeneratePrompt() {
       toast(err instanceof Error ? err.message : "Something went wrong");
     } finally {
       setLoading(false);
+      requestAnimationFrame(() => textareaRef.current?.focus());
     }
   }
 
@@ -80,7 +82,7 @@ export function GeneratePrompt() {
           isLoading={loading}
           disabled={loading}
         >
-          <PromptInputTextarea placeholder={placeholder} />
+          <PromptInputTextarea ref={textareaRef} placeholder={placeholder} />
           <PromptInputActions className="justify-end px-1 pb-1">
             <PromptInputAction tooltip="Send">
               <Button

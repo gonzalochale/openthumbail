@@ -14,6 +14,7 @@ import React, {
   useLayoutEffect,
   useRef,
   useState,
+  useCallback,
 } from "react";
 
 type PromptInputContextType = {
@@ -109,12 +110,13 @@ export type PromptInputTextareaProps = {
   disableAutosize?: boolean;
 } & React.ComponentProps<typeof Textarea>;
 
-function PromptInputTextarea({
-  className,
-  onKeyDown,
-  disableAutosize = false,
-  ...props
-}: PromptInputTextareaProps) {
+const PromptInputTextarea = React.forwardRef<
+  HTMLTextAreaElement,
+  PromptInputTextareaProps
+>(function PromptInputTextarea(
+  { className, onKeyDown, disableAutosize = false, ...props },
+  forwardedRef,
+) {
   const { value, setValue, maxHeight, onSubmit, disabled, textareaRef } =
     usePromptInput();
 
@@ -130,10 +132,15 @@ function PromptInputTextarea({
     }
   };
 
-  const handleRef = (el: HTMLTextAreaElement | null) => {
-    textareaRef.current = el;
-    adjustHeight(el);
-  };
+  const handleRef = useCallback(
+    (el: HTMLTextAreaElement | null) => {
+      textareaRef.current = el;
+      if (typeof forwardedRef === "function") forwardedRef(el);
+      else if (forwardedRef) forwardedRef.current = el;
+      adjustHeight(el);
+    },
+    [forwardedRef],
+  );
 
   useLayoutEffect(() => {
     if (!textareaRef.current || disableAutosize) return;
@@ -176,7 +183,7 @@ function PromptInputTextarea({
       {...props}
     />
   );
-}
+});
 
 export type PromptInputActionsProps = React.HTMLAttributes<HTMLDivElement>;
 

@@ -4,7 +4,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useThumbnailStore } from "@/store/use-thumbnail-store";
 import { useShallow } from "zustand/react/shallow";
 import { PreviewActions } from "@/components/preview-actions";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 
 export function Preview() {
   const { versions, selectedVersionId, generating } = useThumbnailStore(
@@ -16,6 +16,7 @@ export function Preview() {
   );
 
   const selectedVersion = versions.find((v) => v.id === selectedVersionId);
+  const shouldReduceMotion = useReducedMotion();
 
   return (
     <div className="w-full max-w-5xl flex-1 flex flex-col items-center justify-center gap-2">
@@ -29,9 +30,9 @@ export function Preview() {
             <motion.div
               key="skeleton"
               className="absolute inset-0"
-              initial={{ opacity: 0 }}
+              initial={shouldReduceMotion ? false : { opacity: 0 }}
               animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
+              exit={shouldReduceMotion ? {} : { opacity: 0 }}
               transition={{ duration: 0.3, ease: "easeInOut" }}
             >
               <Skeleton className="w-full h-full" />
@@ -42,9 +43,9 @@ export function Preview() {
               src={`data:${selectedVersion.mimeType};base64,${selectedVersion.imageBase64}`}
               alt={`Thumbnail v${selectedVersion.id}`}
               className="absolute inset-0 w-full h-full object-cover"
-              initial={{ opacity: 0 }}
+              initial={shouldReduceMotion ? false : { opacity: 0 }}
               animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
+              exit={shouldReduceMotion ? {} : { opacity: 0 }}
               transition={{ duration: 0.3, ease: "easeInOut" }}
             />
           ) : null}

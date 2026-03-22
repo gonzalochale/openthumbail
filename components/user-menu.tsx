@@ -9,7 +9,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { authClient } from "@/lib/auth-client";
-import { AnimatePresence, LayoutGroup, motion } from "motion/react";
+import { AnimatePresence, LayoutGroup, motion, useReducedMotion } from "motion/react";
 import { useCredits } from "@/hooks/use-credits";
 import { useThumbnailStore } from "@/store/use-thumbnail-store";
 import { CreditsModal } from "@/components/credits-modal";
@@ -30,15 +30,22 @@ export function UserMenu() {
     router.refresh();
   }
 
+  const shouldReduceMotion = useReducedMotion();
   const springTransition = {
     type: "spring",
     bounce: 0,
     duration: 0.6,
   } as const;
   const motionProps = {
-    initial: { opacity: 0, filter: "blur(5px)" },
-    animate: { opacity: 1, filter: "blur(0px)" },
-    exit: { opacity: 0, filter: "blur(5px)" },
+    initial: shouldReduceMotion
+      ? { opacity: 0 }
+      : { opacity: 0, filter: "blur(5px)" },
+    animate: shouldReduceMotion
+      ? { opacity: 1 }
+      : { opacity: 1, filter: "blur(0px)" },
+    exit: shouldReduceMotion
+      ? { opacity: 0 }
+      : { opacity: 0, filter: "blur(5px)" },
     transition: springTransition,
   };
 

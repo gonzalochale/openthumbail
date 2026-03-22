@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { ArrowUp, Paperclip, X } from "lucide-react";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { useThumbnailStore } from "@/store/use-thumbnail-store";
@@ -131,6 +132,7 @@ function MentionStatusChip({
 
 export function GeneratePrompt() {
   useThumbnailShortcuts();
+  const shouldReduceMotion = useReducedMotion();
   const [prompt, setPrompt] = useState("");
   const [fileEntries, setFileEntries] = useState<FileEntry[]>([]);
   const [authModalOpen, setAuthModalOpen] = useState(false);
@@ -141,8 +143,8 @@ export function GeneratePrompt() {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const overlayRef = useRef<HTMLDivElement>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const inflightRef = useRef<string | null>(null); // handle currently being fetched
-  const pendingHandleRef = useRef<string | null>(null); // handle waiting for debounce
+  const inflightRef = useRef<string | null>(null);
+  const pendingHandleRef = useRef<string | null>(null);
 
   const { data: session, isPending: sessionPending } = authClient.useSession();
   const {
@@ -415,9 +417,7 @@ export function GeneratePrompt() {
 
     const { selectionStart, selectionEnd } = textareaRef.current;
     const newValue =
-      prompt.slice(0, selectionStart) +
-      pastedText +
-      prompt.slice(selectionEnd);
+      prompt.slice(0, selectionStart) + pastedText + prompt.slice(selectionEnd);
 
     if (newValue.length > MAX_PROMPT_LENGTH) {
       e.preventDefault();
@@ -444,38 +444,57 @@ export function GeneratePrompt() {
           >
             {fileEntries.length > 0 && (
               <div className="flex flex-wrap gap-2 px-1 pt-1">
-                {fileEntries.map(({ file, url }, index) => (
-                  <div
-                    key={url}
-                    className="bg-background border flex items-center gap-2 rounded-lg p-1.5 pr-2.5 text-sm"
-                    onClick={(e) => e.stopPropagation()}
-                  >
-                    <img
-                      src={url}
-                      alt={file.name}
-                      className="size-9 rounded-sm object-cover shrink-0"
-                    />
-                    <div className="flex flex-col min-w-0">
-                      <span className="max-w-10 truncate text-xs font-medium leading-tight">
-                        {file.name}
-                      </span>
-                      <span className="text-muted-foreground text-xs leading-tight">
-                        {formatFileSize(file.size)}
-                      </span>
-                    </div>
-                    <button
-                      onClick={() => removeFile(index)}
-                      className={
-                        buttonVariants({
-                          variant: "destructive",
-                          size: "icon-sm",
-                        }) + " ml-auto"
+                <AnimatePresence mode="popLayout">
+                  {fileEntries.map(({ file, url }, index) => (
+                    <motion.div
+                      key={url}
+                      layout
+                      initial={
+                        shouldReduceMotion
+                          ? { opacity: 0 }
+                          : { opacity: 0, scale: 0.85, filter: "blur(4px)" }
                       }
+                      animate={
+                        shouldReduceMotion
+                          ? { opacity: 1 }
+                          : { opacity: 1, scale: 1, filter: "blur(0px)" }
+                      }
+                      exit={
+                        shouldReduceMotion
+                          ? { opacity: 0 }
+                          : { opacity: 0, scale: 0.85 }
+                      }
+                      transition={{ type: "spring", bounce: 0, duration: 0.25 }}
+                      className="bg-background border flex items-center gap-2 rounded-lg p-1.5 pr-2.5 text-sm"
+                      onClick={(e) => e.stopPropagation()}
                     >
-                      <X className="size-3.5" />
-                    </button>
-                  </div>
-                ))}
+                      <img
+                        src={url}
+                        alt={file.name}
+                        className="size-9 rounded-sm object-cover shrink-0"
+                      />
+                      <div className="flex flex-col min-w-0">
+                        <span className="max-w-10 truncate text-xs font-medium leading-tight">
+                          {file.name}
+                        </span>
+                        <span className="text-muted-foreground text-xs leading-tight">
+                          {formatFileSize(file.size)}
+                        </span>
+                      </div>
+                      <button
+                        onClick={() => removeFile(index)}
+                        className={
+                          buttonVariants({
+                            variant: "destructive",
+                            size: "icon-sm",
+                          }) + " ml-auto"
+                        }
+                      >
+                        <X className="size-3.5" />
+                      </button>
+                    </motion.div>
+                  ))}
+                </AnimatePresence>
               </div>
             )}
             <div className="relative">
@@ -521,13 +540,24 @@ export function GeneratePrompt() {
                               <div className="grid grid-cols-3 gap-1.5 select-none">
                                 {channelRef.thumbnails
                                   .slice(0, 3)
-                                  .map((thumb) => (
-                                    <img
+                                  .map((thumb, i) => (
+                                    <motion.img
                                       key={thumb.videoId}
                                       src={thumb.url}
                                       alt={thumb.title}
                                       className="aspect-video w-full rounded-sm object-cover"
                                       draggable={false}
+                                      initial={
+                                        shouldReduceMotion
+                                          ? false
+                                          : { opacity: 0, scale: 0.95 }
+                                      }
+                                      animate={{ opacity: 1, scale: 1 }}
+                                      transition={{
+                                        duration: 0.18,
+                                        delay: i * 0.04,
+                                        ease: [0.25, 1, 0.5, 1],
+                                      }}
                                     />
                                   ))}
                               </div>

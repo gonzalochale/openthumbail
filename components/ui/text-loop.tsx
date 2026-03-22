@@ -6,6 +6,7 @@ import {
   Transition,
   Variants,
   AnimatePresenceProps,
+  useReducedMotion,
 } from "motion/react";
 import { useState, useEffect, Children } from "react";
 
@@ -34,6 +35,7 @@ export function TextLoop({
   presenceInitial = false,
   startIndex = 0,
 }: TextLoopProps) {
+  const shouldReduceMotion = useReducedMotion();
   const [currentIndex, setCurrentIndex] = useState(startIndex);
   const items = Children.toArray(children);
 
@@ -58,11 +60,17 @@ export function TextLoop({
     return () => clearTimeout(timer);
   }, [items.length, interval, onIndexChange, trigger]);
 
-  const motionVariants: Variants = {
-    initial: { y: 20, opacity: 0 },
-    animate: { y: 0, opacity: 1 },
-    exit: { y: -20, opacity: 0 },
-  };
+  const motionVariants: Variants = shouldReduceMotion
+    ? {
+        initial: { opacity: 0 },
+        animate: { opacity: 1 },
+        exit: { opacity: 0 },
+      }
+    : {
+        initial: { y: 20, opacity: 0 },
+        animate: { y: 0, opacity: 1 },
+        exit: { y: -20, opacity: 0 },
+      };
 
   return (
     <div className={cn("relative inline-block whitespace-nowrap", className)}>

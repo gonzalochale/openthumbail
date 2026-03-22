@@ -26,7 +26,7 @@ import { authClient } from "@/lib/auth-client";
 import { AuthModal } from "@/components/auth-modal";
 import { CreditsModal } from "@/components/credits-modal";
 import { resizeAndToBase64, formatFileSize } from "@/lib/utils";
-import { MAX_FILES } from "@/lib/constants";
+import { MAX_FILES, MAX_PROMPT_LENGTH } from "@/lib/constants";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   HoverCard,
@@ -409,6 +409,20 @@ export function GeneratePrompt() {
       .filter((f): f is File => f !== null);
 
     if (imageFiles.length > 0) addFiles(imageFiles);
+
+    const pastedText = e.clipboardData.getData("text");
+    if (!pastedText || !textareaRef.current) return;
+
+    const { selectionStart, selectionEnd } = textareaRef.current;
+    const newValue =
+      prompt.slice(0, selectionStart) +
+      pastedText +
+      prompt.slice(selectionEnd);
+
+    if (newValue.length > MAX_PROMPT_LENGTH) {
+      e.preventDefault();
+      handleValueChange(newValue.slice(0, MAX_PROMPT_LENGTH));
+    }
   }
 
   const placeholder =
@@ -579,6 +593,7 @@ export function GeneratePrompt() {
                 ref={textareaRef}
                 placeholder={placeholder}
                 autoFocus
+                maxLength={MAX_PROMPT_LENGTH}
                 className="caret-foreground text-transparent"
                 onScroll={() => {
                   if (overlayRef.current && textareaRef.current) {

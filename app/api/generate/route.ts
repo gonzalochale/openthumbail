@@ -9,6 +9,7 @@ import {
   CHANNEL_STYLE_INSTRUCTION,
   CREATE_IMAGES,
   IMAGE_MODEL,
+  MAX_PROMPT_LENGTH,
   SAFETY_MODEL,
   THUMBNAIL_SYSTEM_PROMPT,
 } from "@/lib/constants";
@@ -52,7 +53,16 @@ export async function POST(req: Request) {
   };
 
   if (!prompt?.trim()) {
-    return Response.json({ error: "Prompt is required" }, { status: 400 });
+    return Response.json({ error: "Message is required" }, { status: 400 });
+  }
+
+  if (prompt.length > MAX_PROMPT_LENGTH) {
+    return Response.json(
+      {
+        error: `Message exceeds maximum length of ${MAX_PROMPT_LENGTH} characters`,
+      },
+      { status: 400 },
+    );
   }
 
   let allReferenceImages: ReferenceImage[] = referenceImages ?? [];

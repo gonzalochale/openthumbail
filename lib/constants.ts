@@ -38,6 +38,7 @@ export const GENERATING_PHRASES = [
   "Making your content stand out...",
 ];
 export const MAX_FILES = 5;
+export const MAX_PROMPT_LENGTH = 1000;
 export const MAX_REFERENCE_PX = 512;
 export const CREATE_IMAGES = process.env.GENERATE_IMAGES === "true";
 export const SAFETY_MODEL = "gemini-3-flash-preview";

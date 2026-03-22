@@ -181,9 +181,7 @@ export function GeneratePrompt() {
       return;
     }
     if (newFiles.length > remaining) {
-      toast(
-        `Only ${remaining} more image${remaining === 1 ? "" : "s"} can be added`,
-      );
+      toast(`You can only attach up to ${MAX_FILES} images`);
     }
     const toAdd = newFiles
       .slice(0, remaining)

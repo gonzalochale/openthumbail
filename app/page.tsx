@@ -2,6 +2,7 @@ import { Preview } from "@/components/preview";
 import { GeneratePrompt } from "@/components/generate-prompt";
 import { UserMenu } from "@/components/user-menu";
 import { PaymentReturnHandler } from "@/components/payment-return-handler";
+import { KonamiCode } from "@/components/konami-code";
 
 export default function Home() {
   return (
@@ -10,6 +11,7 @@ export default function Home() {
       <Preview />
       <GeneratePrompt />
       <PaymentReturnHandler />
+      <KonamiCode />
     </main>
   );
 }

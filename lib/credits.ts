@@ -32,6 +32,34 @@ export async function refundCredit(userId: string): Promise<void> {
   ]);
 }
 
+export async function grantKonamiCredits(
+  userId: string,
+): Promise<{ newBalance: number; alreadyRedeemed: boolean }> {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const insert = await client.query(
+      `INSERT INTO konami_redemption (user_id) VALUES ($1) ON CONFLICT (user_id) DO NOTHING`,
+      [userId],
+    );
+    if ((insert.rowCount ?? 0) === 0) {
+      await client.query("ROLLBACK");
+      return { newBalance: 0, alreadyRedeemed: true };
+    }
+    const result = await client.query<{ credits: number }>(
+      `UPDATE "user" SET credits = credits + 5 WHERE id = $1 RETURNING credits`,
+      [userId],
+    );
+    await client.query("COMMIT");
+    return { newBalance: result.rows[0]?.credits ?? 0, alreadyRedeemed: false };
+  } catch (err) {
+    await client.query("ROLLBACK");
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
 export async function grantCredits(
   userId: string,
   stripeSessionId: string,

@@ -9,10 +9,37 @@ import {
   CHANNEL_STYLE_INSTRUCTION,
   CREATE_IMAGES,
   IMAGE_MODEL,
+  MAX_FILES,
   MAX_PROMPT_LENGTH,
   SAFETY_MODEL,
   THUMBNAIL_SYSTEM_PROMPT,
+  VIDEO_STYLE_INSTRUCTION,
 } from "@/lib/constants";
+
+interface ReferenceImage {
+  imageBase64: string;
+  mimeType: string;
+}
+
+async function fetchImages(urls: string[]): Promise<ReferenceImage[]> {
+  const results = await Promise.allSettled(
+    urls.map(async (url) => {
+      const r = await fetch(url);
+      if (!r.ok) throw new Error(`Failed to fetch image: ${url}`);
+      const buf = await r.arrayBuffer();
+      return {
+        imageBase64: Buffer.from(buf).toString("base64"),
+        mimeType: "image/jpeg",
+      } satisfies ReferenceImage;
+    }),
+  );
+  return results
+    .filter(
+      (r): r is PromiseFulfilledResult<ReferenceImage> =>
+        r.status === "fulfilled",
+    )
+    .map((r) => r.value);
+}
 
 const safetySchema = z.object({
   blocked: z.boolean(),
@@ -24,11 +51,6 @@ interface PreviousVersion {
   imageBase64: string;
   mimeType: string;
   enhancedPrompt: string | null;
-}
-
-interface ReferenceImage {
-  imageBase64: string;
-  mimeType: string;
 }
 
 export async function POST(req: Request) {
@@ -44,12 +66,14 @@ export async function POST(req: Request) {
     referenceImages,
     channelThumbnailUrls,
     channelHandle,
+    videoThumbnailUrls,
   } = body as {
     prompt: string;
     previousVersion?: PreviousVersion;
     referenceImages?: ReferenceImage[];
     channelThumbnailUrls?: string[];
     channelHandle?: string;
+    videoThumbnailUrls?: string[];
   };
 
   if (!prompt?.trim()) {
@@ -65,27 +89,15 @@ export async function POST(req: Request) {
     );
   }
 
-  let allReferenceImages: ReferenceImage[] = referenceImages ?? [];
-  if (channelThumbnailUrls && channelThumbnailUrls.length > 0) {
-    const fetched = await Promise.allSettled(
-      channelThumbnailUrls.map(async (url) => {
-        const r = await fetch(url);
-        if (!r.ok) throw new Error(`Failed to fetch thumbnail: ${url}`);
-        const buf = await r.arrayBuffer();
-        return {
-          imageBase64: Buffer.from(buf).toString("base64"),
-          mimeType: "image/jpeg",
-        } satisfies ReferenceImage;
-      }),
-    );
-    const resolved = fetched
-      .filter(
-        (r): r is PromiseFulfilledResult<ReferenceImage> =>
-          r.status === "fulfilled",
-      )
-      .map((r) => r.value);
-    allReferenceImages = [...allReferenceImages, ...resolved];
-  }
+  const [channelImages, videoImages] = await Promise.all([
+    channelThumbnailUrls?.length ? fetchImages(channelThumbnailUrls) : [],
+    videoThumbnailUrls?.length ? fetchImages(videoThumbnailUrls) : [],
+  ]);
+  const allReferenceImages = [
+    ...(referenceImages ?? []),
+    ...channelImages,
+    ...videoImages,
+  ].slice(0, MAX_FILES);
 
   const apiKey = process.env.GOOGLE_AI_STUDIO_API_KEY;
 
@@ -145,20 +157,38 @@ export async function POST(req: Request) {
     const hasReferenceImages = allReferenceImages.length > 0;
     const hasChannelThumbs =
       channelThumbnailUrls && channelThumbnailUrls.length > 0;
+    const hasVideoThumbs = videoThumbnailUrls && videoThumbnailUrls.length > 0;
     const hasPreviousVersion = !!previousVersion;
 
     let imagePromptText = safePrompt;
 
     if (hasPreviousVersion && hasReferenceImages) {
       const userRefCount = (referenceImages ?? []).length;
-      const channelRefCount = allReferenceImages.length - userRefCount;
+      const channelRefCount = hasChannelThumbs
+        ? channelThumbnailUrls.length
+        : 0;
+      const videoRefCount = hasVideoThumbs ? videoThumbnailUrls.length : 0;
       let refDesc = "";
-      if (userRefCount > 0 && channelRefCount > 0) {
+      if (userRefCount > 0 && (channelRefCount > 0 || videoRefCount > 0)) {
+        const styleDesc = [
+          channelRefCount > 0
+            ? `${channelRefCount} thumbnails from @${channelHandle ?? "unknown"}`
+            : null,
+          videoRefCount > 0
+            ? `${videoRefCount} YouTube video thumbnail(s)`
+            : null,
+        ]
+          .filter(Boolean)
+          .join(" and ");
         refDesc =
-          `${userRefCount} user-provided visual reference(s), followed by ${channelRefCount} thumbnails from @${channelHandle ?? "unknown"} ` +
+          `${userRefCount} user-provided visual reference(s), followed by ${styleDesc} ` +
           `used as style-only references (colors, composition, typography — no faces or specific elements).`;
+      } else if (channelRefCount > 0 && videoRefCount > 0) {
+        refDesc = `${channelRefCount} thumbnails from @${channelHandle ?? "unknown"} and ${videoRefCount} YouTube video thumbnail(s) used as style-only references. ${CHANNEL_STYLE_INSTRUCTION}`;
       } else if (channelRefCount > 0) {
         refDesc = `${channelRefCount} thumbnails from @${channelHandle ?? "unknown"} used as style-only references. ${CHANNEL_STYLE_INSTRUCTION}`;
+      } else if (videoRefCount > 0) {
+        refDesc = `${videoRefCount} YouTube video thumbnail(s) used as style-only references. ${VIDEO_STYLE_INSTRUCTION}`;
       } else {
         refDesc = `${userRefCount} visual reference image(s) provided by the user.`;
       }
@@ -172,15 +202,33 @@ export async function POST(req: Request) {
       const channelRefCount = hasChannelThumbs
         ? channelThumbnailUrls.length
         : 0;
-      const userRefCount = allReferenceImages.length - channelRefCount;
+      const videoRefCount = hasVideoThumbs ? videoThumbnailUrls.length : 0;
+      const userRefCount =
+        allReferenceImages.length - channelRefCount - videoRefCount;
       let refDesc = "";
-      if (userRefCount > 0 && channelRefCount > 0) {
+      if (userRefCount > 0 && (channelRefCount > 0 || videoRefCount > 0)) {
+        const styleDesc = [
+          channelRefCount > 0
+            ? `${channelRefCount} thumbnail(s) from @${channelHandle ?? "unknown"} — use for style only`
+            : null,
+          videoRefCount > 0
+            ? `${videoRefCount} YouTube video thumbnail(s) — use for style only`
+            : null,
+        ]
+          .filter(Boolean)
+          .join("; ");
         refDesc =
           `The first ${userRefCount} image(s) are user-provided visual references. ` +
-          `The last ${channelRefCount} image(s) are thumbnails from @${channelHandle ?? "unknown"} — use them for style only (colors, composition, typography). ` +
+          `The remaining image(s) are ${styleDesc} (colors, composition, typography). ` +
           `Do NOT copy faces, people, specific objects, or text from them.`;
+      } else if (channelRefCount > 0 && videoRefCount > 0) {
+        refDesc =
+          `The first ${channelRefCount} image(s) are thumbnails from @${channelHandle ?? "unknown"}. ` +
+          `The remaining ${videoRefCount} image(s) are YouTube video thumbnails. ${CHANNEL_STYLE_INSTRUCTION}`;
       } else if (channelRefCount > 0) {
         refDesc = `The attached images are thumbnails from @${channelHandle ?? "unknown"}. ${CHANNEL_STYLE_INSTRUCTION}`;
+      } else if (videoRefCount > 0) {
+        refDesc = `The attached image(s) are thumbnails from specific YouTube videos. ${VIDEO_STYLE_INSTRUCTION}`;
       } else {
         refDesc = `The attached image(s) are visual references provided by the user (branding, style, colors, composition).`;
       }

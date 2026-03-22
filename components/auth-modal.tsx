@@ -19,12 +19,9 @@ export function AuthModal({ open, onOpenChange }: AuthModalProps) {
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent showCloseButton={false} className="max-w-xs">
         <DialogHeader>
-          <DialogTitle className="text-base font-semibold">
-            Sign in to continue
-          </DialogTitle>
+          <DialogTitle className="text-base font-semibold">Welcome</DialogTitle>
           <DialogDescription>
-            Create an account or sign in to generate thumbnails and manage your
-            creations.
+            Please sign in with GitHub to continue
           </DialogDescription>
         </DialogHeader>
         <GitHubSignInButton className="w-full mt-2" />

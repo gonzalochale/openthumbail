@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { ArrowUp, Paperclip, X } from "lucide-react";
 import { Button, buttonVariants } from "@/components/ui/button";
@@ -27,7 +27,21 @@ import { authClient } from "@/lib/auth-client";
 import { AuthModal } from "@/components/auth-modal";
 import { CreditsModal } from "@/components/credits-modal";
 import { resizeAndToBase64, formatFileSize } from "@/lib/utils";
-import { MAX_FILES, MAX_PROMPT_LENGTH } from "@/lib/constants";
+import {
+  DEBOUNCE_MS,
+  MAX_FILES,
+  MAX_PROMPT_LENGTH,
+  VIDEO_TITLE_MAX_LENGTH,
+} from "@/lib/constants";
+import {
+  type ChannelReference,
+  type ChannelWidget,
+  type VideoChip,
+  countChannelThumbnails,
+  extractYouTubeMatches,
+  stripVideoChips,
+  youtubeRe,
+} from "@/lib/youtube";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   HoverCard,
@@ -35,65 +49,78 @@ import {
   HoverCardTrigger,
 } from "@/components/ui/hover-card";
 import { useThumbnailShortcuts } from "@/hooks/use-thumbnail-shortcuts";
+import { TextScramble } from "@/components/ui/text-scramble";
 
 type FileEntry = { file: File; url: string };
 
-export type ChannelThumbnail = {
-  videoId: string;
-  url: string;
-  title: string;
-};
-
-export type ChannelReference = {
-  handle: string;
-  thumbnails: ChannelThumbnail[];
-};
-
-type ChannelWidget =
-  | { stage: "loading"; handle: string }
-  | { stage: "found"; ref: ChannelReference }
-  | { stage: "empty"; handle: string }
-  | { stage: "error"; handle: string }
-  | null;
-
-const MENTION_RE = /@([\w.-]*)/;
-const DEBOUNCE_MS = 600;
-
 type TextSegment =
   | { type: "plain"; text: string }
-  | { type: "active"; text: string }
-  | { type: "extra"; text: string };
+  | { type: "active"; text: string; handle: string }
+  | { type: "duplicate-channel"; text: string }
+  | { type: "youtube-url"; text: string; videoId: string };
 
 function getTextSegments(
   text: string,
-  activeHandle: string | null,
+  channelWidgets: Map<string, ChannelWidget>,
+  chips: VideoChip[],
 ): TextSegment[] {
-  const re = /@([\w.-]*)/g;
-  const segments: TextSegment[] = [];
-  let last = 0;
-  let activeConsumed = false;
+  type RawMatch = { start: number; end: number; segment: TextSegment };
+  const matches: RawMatch[] = [];
+
+  const mentionRe = /@([\w.-]*)/g;
+  const seenHandles = new Set<string>();
   let m: RegExpExecArray | null;
-
-  while ((m = re.exec(text)) !== null) {
-    if (m.index > last)
-      segments.push({ type: "plain", text: text.slice(last, m.index) });
-
+  while ((m = mentionRe.exec(text)) !== null) {
     const mentionText = m[0];
     const handle = m[1];
-    const isActive =
-      !activeConsumed &&
-      activeHandle !== null &&
-      (activeHandle === "" || handle === activeHandle);
-
-    if (isActive) {
-      segments.push({ type: "active", text: mentionText });
-      activeConsumed = true;
-    } else {
-      segments.push({ type: "extra", text: mentionText });
+    if (!channelWidgets.has(handle)) continue;
+    if (seenHandles.has(handle)) {
+      matches.push({
+        start: m.index,
+        end: m.index + mentionText.length,
+        segment: { type: "duplicate-channel", text: mentionText },
+      });
+      continue;
     }
-    last = m.index + mentionText.length;
+    seenHandles.add(handle);
+    matches.push({
+      start: m.index,
+      end: m.index + mentionText.length,
+      segment: { type: "active", text: mentionText, handle },
+    });
   }
 
+  const ytRe = youtubeRe();
+  while ((m = ytRe.exec(text)) !== null) {
+    matches.push({
+      start: m.index,
+      end: m.index + m[0].length,
+      segment: { type: "youtube-url", text: m[0], videoId: m[1] },
+    });
+  }
+
+  for (const chip of chips) {
+    if (chip.stage !== "found") continue;
+    const idx = text.indexOf(chip.title);
+    if (idx === -1) continue;
+    matches.push({
+      start: idx,
+      end: idx + chip.title.length,
+      segment: { type: "youtube-url", text: chip.title, videoId: chip.videoId },
+    });
+  }
+
+  matches.sort((a, b) => a.start - b.start);
+
+  const segments: TextSegment[] = [];
+  let last = 0;
+  for (const { start, end, segment } of matches) {
+    if (start < last) continue;
+    if (start > last)
+      segments.push({ type: "plain", text: text.slice(last, start) });
+    segments.push(segment);
+    last = end;
+  }
   if (last < text.length)
     segments.push({ type: "plain", text: text.slice(last) });
   return segments;
@@ -137,14 +164,19 @@ export function GeneratePrompt() {
   const [fileEntries, setFileEntries] = useState<FileEntry[]>([]);
   const [authModalOpen, setAuthModalOpen] = useState(false);
   const [creditsModalOpen, setCreditsModalOpen] = useState(false);
-  const [channelWidget, setChannelWidget] = useState<ChannelWidget>(null);
+  const [channelWidgets, setChannelWidgets] = useState<
+    Map<string, ChannelWidget>
+  >(new Map());
+  const [videoChips, setVideoChips] = useState<VideoChip[]>([]);
 
   const pendingActionRef = useRef<"submit" | "attach" | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const overlayRef = useRef<HTMLDivElement>(null);
-  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const inflightRef = useRef<string | null>(null);
-  const pendingHandleRef = useRef<string | null>(null);
+  const debounceTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(
+    new Map(),
+  );
+  const inflightHandlesRef = useRef<Set<string>>(new Set());
+  const videoInflightRef = useRef<Set<string>>(new Set());
 
   const { data: session, isPending: sessionPending } = authClient.useSession();
   const {
@@ -177,13 +209,18 @@ export function GeneratePrompt() {
       setAuthModalOpen(true);
       return;
     }
-    const remaining = MAX_FILES - fileEntries.length;
+    const channelCount = countChannelThumbnails(channelWidgets);
+    const videoCount = videoChips.filter((c) => c.stage !== "error").length;
+    const remaining =
+      MAX_FILES - fileEntries.length - videoCount - channelCount;
     if (remaining <= 0) {
-      toast("You can only attach up to 5 images");
+      toast(`You've reached the ${MAX_FILES} reference image limit`);
       return;
     }
     if (newFiles.length > remaining) {
-      toast(`You can only attach up to ${MAX_FILES} images`);
+      toast(
+        `Only ${remaining} reference slot${remaining === 1 ? "" : "s"} left (${MAX_FILES} max total)`,
+      );
     }
     const toAdd = newFiles
       .slice(0, remaining)
@@ -199,101 +236,225 @@ export function GeneratePrompt() {
   }
 
   async function fetchChannel(handle: string) {
-    inflightRef.current = handle;
+    inflightHandlesRef.current.add(handle);
     try {
       const res = await fetch(
         `/api/youtube/channel?handle=${encodeURIComponent(handle)}`,
       );
-      if (inflightRef.current !== handle) return;
+      if (!inflightHandlesRef.current.has(handle)) return;
       const data = await res.json();
       if (!res.ok) {
-        setChannelWidget({ stage: "error", handle });
+        setChannelWidgets((prev) =>
+          new Map(prev).set(handle, { stage: "error", handle }),
+        );
         return;
       }
       const ref = data as ChannelReference;
-      if (ref.thumbnails.length === 0) {
-        setChannelWidget({ stage: "empty", handle });
-      } else {
-        setChannelWidget({ stage: "found", ref });
-      }
+      setChannelWidgets((prev) =>
+        new Map(prev).set(
+          handle,
+          ref.thumbnails.length === 0
+            ? { stage: "empty", handle }
+            : { stage: "found", ref },
+        ),
+      );
     } catch {
-      if (inflightRef.current === handle)
-        setChannelWidget({ stage: "error", handle });
+      if (inflightHandlesRef.current.has(handle))
+        setChannelWidgets((prev) =>
+          new Map(prev).set(handle, { stage: "error", handle }),
+        );
     } finally {
-      if (inflightRef.current === handle) inflightRef.current = null;
+      inflightHandlesRef.current.delete(handle);
+    }
+  }
+
+  async function addVideoChip(videoId: string, originalUrl: string) {
+    if (videoInflightRef.current.has(videoId)) return;
+    if (videoChips.some((c) => c.videoId === videoId)) return;
+    const totalUsed =
+      fileEntries.length +
+      videoChips.length +
+      videoInflightRef.current.size +
+      countChannelThumbnails(channelWidgets);
+    if (totalUsed >= MAX_FILES) {
+      toast(`You've reached the ${MAX_FILES} reference image limit`);
+      return;
+    }
+    videoInflightRef.current.add(videoId);
+    setVideoChips((prev) => [
+      ...prev,
+      { stage: "loading", videoId, originalUrl },
+    ]);
+    try {
+      const res = await fetch(
+        `/api/youtube/video?videoId=${encodeURIComponent(videoId)}`,
+      );
+      if (!videoInflightRef.current.has(videoId)) return;
+      const data = await res.json();
+      if (!res.ok) {
+        setVideoChips((prev) =>
+          prev.map((c) =>
+            c.videoId === videoId
+              ? { stage: "error", videoId, originalUrl }
+              : c,
+          ),
+        );
+        return;
+      }
+      const rawTitle = data.title as string;
+      const title =
+        rawTitle.length > VIDEO_TITLE_MAX_LENGTH
+          ? rawTitle.slice(0, VIDEO_TITLE_MAX_LENGTH - 1) + "…"
+          : rawTitle;
+      setVideoChips((prev) =>
+        prev.map((c) =>
+          c.videoId === videoId
+            ? { stage: "found", videoId, title, originalUrl }
+            : c,
+        ),
+      );
+      setPrompt((prev) => prev.replace(originalUrl, title));
+    } catch {
+      if (videoInflightRef.current.has(videoId))
+        setVideoChips((prev) =>
+          prev.map((c) =>
+            c.videoId === videoId
+              ? { stage: "error", videoId, originalUrl }
+              : c,
+          ),
+        );
+    } finally {
+      videoInflightRef.current.delete(videoId);
     }
   }
 
   function handleValueChange(value: string) {
+    const urlMatches = extractYouTubeMatches(value);
+
+    for (const m of urlMatches) {
+      if (
+        videoChips.some((c) => c.videoId === m.videoId) ||
+        videoInflightRef.current.has(m.videoId)
+      ) {
+        value = value
+          .replace(m.matchedUrl, "")
+          .replace(/\s{2,}/g, " ")
+          .trimStart();
+      }
+    }
+
+    const titleChips = videoChips.filter(
+      (c) => c.stage === "found" && value.includes(c.title),
+    );
+    const idsInTextSet = new Set([
+      ...urlMatches.map((m) => m.videoId),
+      ...titleChips.map((c) => c.videoId),
+    ]);
+
+    const toAdd = urlMatches.filter(
+      (m) =>
+        !videoChips.some((c) => c.videoId === m.videoId) &&
+        !videoInflightRef.current.has(m.videoId),
+    );
+
+    if (videoChips.some((c) => !idsInTextSet.has(c.videoId))) {
+      setVideoChips((prev) => prev.filter((c) => idsInTextSet.has(c.videoId)));
+    }
+
+    for (const id of [...videoInflightRef.current]) {
+      if (!idsInTextSet.has(id)) videoInflightRef.current.delete(id);
+    }
+
+    toAdd.forEach((m) => addVideoChip(m.videoId, m.matchedUrl));
+
     setPrompt(value);
     if (pendingPrompt !== null) setPendingPrompt(value.trim() || null);
 
-    const match = value.match(MENTION_RE);
-    const handle = match ? match[1] : null;
+    const mentionedHandles = new Set<string>();
+    const mentionRe = /@([\w.-]*)/g;
+    let mm: RegExpExecArray | null;
+    while ((mm = mentionRe.exec(value)) !== null) mentionedHandles.add(mm[1]);
 
-    if (handle === null) {
-      if (debounceRef.current) clearTimeout(debounceRef.current);
-      inflightRef.current = null;
-      pendingHandleRef.current = null;
-      setChannelWidget(null);
-      return;
-    }
-
-    if (handle === "") {
-      if (debounceRef.current) clearTimeout(debounceRef.current);
-      pendingHandleRef.current = null;
-      if (channelWidget?.stage !== "loading" || channelWidget.handle !== "") {
-        setChannelWidget({ stage: "loading", handle: "" });
+    for (const [h, timer] of debounceTimersRef.current) {
+      if (!mentionedHandles.has(h)) {
+        clearTimeout(timer);
+        debounceTimersRef.current.delete(h);
       }
-      return;
+    }
+    for (const h of [...inflightHandlesRef.current]) {
+      if (!mentionedHandles.has(h)) inflightHandlesRef.current.delete(h);
     }
 
-    if (handle === pendingHandleRef.current) return;
+    const toRemove = [...channelWidgets.keys()].filter(
+      (h) => !mentionedHandles.has(h),
+    );
+    const toAddHandles = [...mentionedHandles].filter(
+      (h) =>
+        !channelWidgets.has(h) &&
+        !inflightHandlesRef.current.has(h) &&
+        !debounceTimersRef.current.has(h),
+    );
 
-    const resolvedHandle =
-      channelWidget?.stage === "found"
-        ? channelWidget.ref.handle
-        : channelWidget?.stage === "error" || channelWidget?.stage === "empty"
-          ? channelWidget.handle
-          : null;
-    if (handle === resolvedHandle) return;
+    if (toRemove.length > 0 || toAddHandles.length > 0) {
+      setChannelWidgets((prev) => {
+        const next = new Map(prev);
+        for (const h of toRemove) next.delete(h);
+        for (const h of toAddHandles)
+          next.set(h, { stage: "loading", handle: h });
+        return next;
+      });
+    }
 
-    pendingHandleRef.current = handle;
-    inflightRef.current = null;
-    setChannelWidget({ stage: "loading", handle });
-    if (debounceRef.current) clearTimeout(debounceRef.current);
-    debounceRef.current = setTimeout(() => {
-      pendingHandleRef.current = null;
-      fetchChannel(handle);
-    }, DEBOUNCE_MS);
+    for (const h of toAddHandles) {
+      if (h === "") continue;
+      const timer = setTimeout(() => {
+        debounceTimersRef.current.delete(h);
+        fetchChannel(h);
+      }, DEBOUNCE_MS);
+      debounceTimersRef.current.set(h, timer);
+    }
   }
 
-  const channelRef =
-    channelWidget?.stage === "found" ? channelWidget.ref : null;
-
-  const activeHandle =
-    channelWidget === null
-      ? null
-      : channelWidget.stage === "found"
-        ? channelWidget.ref.handle
-        : channelWidget.handle;
-
-  const isError = channelWidget?.stage === "error";
-  const isEmpty = channelWidget?.stage === "empty";
-  const textSegments = /@/.test(prompt)
-    ? getTextSegments(prompt, activeHandle)
-    : null;
+  const textSegments = useMemo(
+    () =>
+      /@/.test(prompt) ||
+      /youtu/.test(prompt) ||
+      videoChips.some((c) => c.stage === "found")
+        ? getTextSegments(prompt, channelWidgets, videoChips)
+        : null,
+    [prompt, channelWidgets, videoChips],
+  );
 
   const doSubmit = useCallback(
     async (promptValue: string) => {
       if (!promptValue.trim() || loading) return;
       const trimmed = promptValue.trim();
+      const videoChipsSnapshot = videoChips;
+      const cleanPrompt = stripVideoChips(trimmed, videoChipsSnapshot);
+      if (!cleanPrompt) return;
+      const foundVideoUrls = videoChipsSnapshot
+        .filter((c): c is VideoChip & { stage: "found" } => c.stage === "found")
+        .map((c) => `https://i.ytimg.com/vi/${c.videoId}/hqdefault.jpg`);
       const entriesToSubmit = fileEntries;
-      const channelRefSnapshot = channelRef;
+      const channelWidgetsSnapshot = channelWidgets;
+      const foundChannels = [...channelWidgetsSnapshot.values()].filter(
+        (w): w is { stage: "found"; ref: ChannelReference } =>
+          w.stage === "found",
+      );
+      const channelThumbnailUrls = foundChannels.flatMap((w) =>
+        w.ref.thumbnails.map((t) => t.url),
+      );
+      const channelHandleStr =
+        foundChannels.map((w) => w.ref.handle).join(", ") || undefined;
       setPrompt("");
       setFileEntries([]);
-      setChannelWidget(null);
-      if (debounceRef.current) clearTimeout(debounceRef.current);
+      setChannelWidgets(new Map());
+      setVideoChips([]);
+      videoInflightRef.current.clear();
+      inflightHandlesRef.current.clear();
+      for (const timer of debounceTimersRef.current.values())
+        clearTimeout(timer);
+      debounceTimersRef.current.clear();
       entriesToSubmit.forEach((e) => URL.revokeObjectURL(e.url));
       startGenerating();
 
@@ -311,7 +472,7 @@ export function GeneratePrompt() {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            prompt: trimmed,
+            prompt: cleanPrompt,
             previousVersion: previousVersion
               ? {
                   imageBase64: previousVersion.imageBase64,
@@ -322,10 +483,12 @@ export function GeneratePrompt() {
             referenceImages:
               referenceImages.length > 0 ? referenceImages : undefined,
             channelThumbnailUrls:
-              channelRefSnapshot && channelRefSnapshot.thumbnails.length > 0
-                ? channelRefSnapshot.thumbnails.map((t) => t.url)
+              channelThumbnailUrls.length > 0
+                ? channelThumbnailUrls
                 : undefined,
-            channelHandle: channelRefSnapshot?.handle,
+            channelHandle: channelHandleStr,
+            videoThumbnailUrls:
+              foundVideoUrls.length > 0 ? foundVideoUrls : undefined,
           }),
         });
         const data = await res.json();
@@ -341,7 +504,7 @@ export function GeneratePrompt() {
           imageBase64: data.image,
           mimeType: data.mimeType,
           enhancedPrompt: data.enhancedPrompt ?? null,
-          prompt: trimmed,
+          prompt: cleanPrompt,
           createdAt: Date.now(),
         });
       } catch (err) {
@@ -353,7 +516,8 @@ export function GeneratePrompt() {
     },
     [
       fileEntries,
-      channelRef,
+      channelWidgets,
+      videoChips,
       loading,
       versions,
       selectedVersionId,
@@ -365,14 +529,16 @@ export function GeneratePrompt() {
   );
 
   const effectivePrompt = prompt.replace(/@[\w.-]*/g, "").trim();
-  const hasExtraMentions =
-    textSegments?.some((s) => s.type === "extra") ?? false;
+  const cleanedEffectivePrompt = stripVideoChips(effectivePrompt, videoChips);
+  const hasDuplicateChannel =
+    textSegments?.some((s) => s.type === "duplicate-channel") ?? false;
   const hasContent =
-    !!effectivePrompt &&
-    !hasExtraMentions &&
-    channelWidget?.stage !== "error" &&
-    channelWidget?.stage !== "loading" &&
-    channelWidget?.stage !== "empty";
+    !!cleanedEffectivePrompt &&
+    !hasDuplicateChannel &&
+    ![...channelWidgets.values()].some(
+      (w) =>
+        w.stage === "error" || w.stage === "loading" || w.stage === "empty",
+    );
 
   const handleSubmit = useCallback(async () => {
     if (!hasContent || loading) return;
@@ -400,9 +566,52 @@ export function GeneratePrompt() {
 
   useEffect(() => {
     return () => {
-      if (debounceRef.current) clearTimeout(debounceRef.current);
+      for (const timer of debounceTimersRef.current.values())
+        clearTimeout(timer);
+      videoInflightRef.current.clear();
+      inflightHandlesRef.current.clear();
     };
   }, []);
+
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+      if ((e.key !== "Backspace" && e.key !== "Delete") || !textareaRef.current)
+        return;
+      if (!textSegments) return;
+      const { selectionStart, selectionEnd } = textareaRef.current;
+
+      let offset = 0;
+      for (const seg of textSegments) {
+        const start = offset;
+        const end = offset + seg.text.length;
+        if (seg.type === "youtube-url") {
+          if (selectionStart === start && selectionEnd === end) break;
+
+          const hitBackspace =
+            e.key === "Backspace" &&
+            selectionStart === selectionEnd &&
+            selectionStart === end;
+          const hitDelete =
+            e.key === "Delete" &&
+            selectionStart === selectionEnd &&
+            selectionStart === start;
+          const hitInside =
+            selectionStart === selectionEnd &&
+            selectionStart > start &&
+            selectionStart < end;
+
+          if (hitBackspace || hitDelete || hitInside) {
+            e.preventDefault();
+            textareaRef.current.selectionStart = start;
+            textareaRef.current.selectionEnd = end;
+            return;
+          }
+        }
+        offset = end;
+      }
+    },
+    [textSegments],
+  );
 
   function handlePaste(e: React.ClipboardEvent) {
     const imageFiles = Array.from(e.clipboardData.items)
@@ -508,19 +717,90 @@ export function GeneratePrompt() {
                       if (p.type === "plain")
                         return <span key={i}>{p.text}</span>;
 
-                      if (p.type === "extra") {
+                      if (p.type === "youtube-url") {
+                        const chip = videoChips.find(
+                          (c) => c.videoId === p.videoId,
+                        );
+                        if (chip?.stage === "error") {
+                          return (
+                            <MentionStatusChip
+                              key={i}
+                              markClass="bg-destructive/15 text-destructive"
+                              textClass="text-destructive"
+                              message="Video not found"
+                            >
+                              {p.text}
+                            </MentionStatusChip>
+                          );
+                        }
+                        const isFound = chip?.stage === "found";
+                        return (
+                          <HoverCard key={i}>
+                            <HoverCardTrigger
+                              delay={200}
+                              closeDelay={100}
+                              render={
+                                <mark
+                                  className={
+                                    isFound
+                                      ? "bg-channel text-channel-foreground rounded-sm not-italic cursor-default pointer-events-auto"
+                                      : "bg-muted text-muted-foreground rounded-sm not-italic animate-pulse cursor-default pointer-events-auto"
+                                  }
+                                />
+                              }
+                            >
+                              <TextScramble
+                                as="span"
+                                trigger={isFound && !shouldReduceMotion}
+                              >
+                                {p.text}
+                              </TextScramble>
+                            </HoverCardTrigger>
+                            <HoverCardContent
+                              className="w-52 p-2"
+                              side="top"
+                              align="start"
+                            >
+                              {isFound ? (
+                                <motion.img
+                                  src={`https://i.ytimg.com/vi/${chip.videoId}/hqdefault.jpg`}
+                                  alt={chip.title}
+                                  className="aspect-video w-full rounded-sm object-cover"
+                                  draggable={false}
+                                  initial={
+                                    shouldReduceMotion
+                                      ? false
+                                      : { opacity: 0, scale: 0.95 }
+                                  }
+                                  animate={{ opacity: 1, scale: 1 }}
+                                  transition={{
+                                    duration: 0.18,
+                                    ease: [0.25, 1, 0.5, 1],
+                                  }}
+                                />
+                              ) : (
+                                <Skeleton className="aspect-video w-full rounded-sm" />
+                              )}
+                            </HoverCardContent>
+                          </HoverCard>
+                        );
+                      }
+                      if (p.type === "duplicate-channel") {
                         return (
                           <MentionStatusChip
                             key={i}
                             markClass="bg-destructive/15 text-destructive"
                             textClass="text-destructive"
-                            message="Only one channel can be referenced per message"
+                            message="Can't tag the same channel twice"
                           >
                             {p.text}
                           </MentionStatusChip>
                         );
                       }
-                      if (channelRef) {
+                      const widget = channelWidgets.get(p.handle);
+                      const widgetRef =
+                        widget?.stage === "found" ? widget.ref : null;
+                      if (widgetRef) {
                         return (
                           <HoverCard key={i}>
                             <HoverCardTrigger
@@ -533,14 +813,14 @@ export function GeneratePrompt() {
                               {p.text}
                             </HoverCardTrigger>
                             <HoverCardContent
-                              className="w-72 p-2"
+                              className="w-52 p-2"
                               side="top"
                               align="start"
                             >
-                              <div className="grid grid-cols-3 gap-1.5 select-none">
-                                {channelRef.thumbnails
+                              <div className="flex flex-col gap-1.5 select-none">
+                                {widgetRef.thumbnails
                                   .slice(0, 3)
-                                  .map((thumb, i) => (
+                                  .map((thumb, j) => (
                                     <motion.img
                                       key={thumb.videoId}
                                       src={thumb.url}
@@ -555,7 +835,7 @@ export function GeneratePrompt() {
                                       animate={{ opacity: 1, scale: 1 }}
                                       transition={{
                                         duration: 0.18,
-                                        delay: i * 0.04,
+                                        delay: j * 0.04,
                                         ease: [0.25, 1, 0.5, 1],
                                       }}
                                     />
@@ -565,7 +845,7 @@ export function GeneratePrompt() {
                           </HoverCard>
                         );
                       }
-                      if (isError) {
+                      if (widget?.stage === "error") {
                         return (
                           <MentionStatusChip
                             key={i}
@@ -577,7 +857,7 @@ export function GeneratePrompt() {
                           </MentionStatusChip>
                         );
                       }
-                      if (isEmpty) {
+                      if (widget?.stage === "empty") {
                         return (
                           <MentionStatusChip
                             key={i}
@@ -601,11 +881,11 @@ export function GeneratePrompt() {
                             {p.text}
                           </HoverCardTrigger>
                           <HoverCardContent
-                            className="w-72 p-2"
+                            className="w-52 p-2"
                             side="top"
                             align="start"
                           >
-                            <div className="grid grid-cols-3 gap-1.5">
+                            <div className="flex flex-col gap-1.5">
                               {Array.from({ length: 3 }).map((_, idx) => (
                                 <Skeleton
                                   key={idx}
@@ -625,6 +905,7 @@ export function GeneratePrompt() {
                 autoFocus
                 maxLength={MAX_PROMPT_LENGTH}
                 className="caret-foreground text-transparent"
+                onKeyDown={handleKeyDown}
                 onScroll={() => {
                   if (overlayRef.current && textareaRef.current) {
                     overlayRef.current.scrollTop =

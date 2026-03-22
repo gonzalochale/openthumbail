@@ -37,8 +37,10 @@ export const GENERATING_PHRASES = [
   "Creating thumbnails that pop...",
   "Making your content stand out...",
 ];
-export const MAX_FILES = 5;
+export const MAX_FILES = 10;
 export const MAX_PROMPT_LENGTH = 1000;
+export const DEBOUNCE_MS = 600;
+export const VIDEO_TITLE_MAX_LENGTH = 25;
 export const MAX_REFERENCE_PX = 512;
 export const CREATE_IMAGES = process.env.GENERATE_IMAGES === "true";
 export const SAFETY_MODEL = "gemini-3-flash-preview";
@@ -56,3 +58,4 @@ Reject the request if the user's idea contains or implies ANY of the following:
 
 If the request is safe, return the user's prompt unchanged in the prompt field.`;
 export const CHANNEL_STYLE_INSTRUCTION = `Extract only the visual style from these thumbnails: color palette, typography treatment, layout composition, contrast levels, and overall energy. Do NOT reproduce any people, faces, specific objects, logos, or text from them. Use the style purely as inspiration to create an original thumbnail.`;
+export const VIDEO_STYLE_INSTRUCTION = `Extract only the visual style from this video's thumbnail: color palette, typography treatment, layout composition, contrast levels, and overall energy. Do NOT reproduce any people, faces, specific objects, logos, or text from it. Use the style purely as inspiration to create an original thumbnail.`;

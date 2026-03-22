@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { LogOut, Sparkles } from "lucide-react";
+import { LogOut } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Tooltip,
@@ -9,18 +9,25 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { authClient } from "@/lib/auth-client";
-import { AnimatePresence, LayoutGroup, motion, useReducedMotion } from "motion/react";
+import {
+  AnimatePresence,
+  LayoutGroup,
+  motion,
+  useReducedMotion,
+} from "motion/react";
 import { useCredits } from "@/hooks/use-credits";
 import { useThumbnailStore } from "@/store/use-thumbnail-store";
 import { CreditsModal } from "@/components/credits-modal";
-import { GitHubSignInButton } from "@/components/github-sign-in-button";
 import NumberFlow from "@number-flow/react";
 import { useRouter } from "next/navigation";
+import { InfoModal } from "@/components/info-modal";
+import { AuthModal } from "./auth-modal";
 
 export function UserMenu() {
   const router = useRouter();
   const { data: session, isPending } = authClient.useSession();
   const [creditsOpen, setCreditsOpen] = useState(false);
+  const [authModalOpen, setAuthModalOpen] = useState(false);
 
   useCredits();
   const credits = useThumbnailStore((s) => s.credits);
@@ -58,7 +65,14 @@ export function UserMenu() {
             className="w-full flex items-center justify-end"
             {...motionProps}
           >
-            <GitHubSignInButton />
+            <InfoModal />
+            <Button
+              size="lg"
+              variant="ghost"
+              onClick={() => setAuthModalOpen(true)}
+            >
+              Log in
+            </Button>
           </motion.header>
         )}
         {!isPending && session && (
@@ -72,6 +86,7 @@ export function UserMenu() {
                 default: springTransition,
               }}
             >
+              <InfoModal />
               <motion.div layout transition={springTransition}>
                 <Tooltip>
                   <TooltipTrigger
@@ -110,6 +125,7 @@ export function UserMenu() {
           </LayoutGroup>
         )}
       </AnimatePresence>
+      <AuthModal open={authModalOpen} onOpenChange={setAuthModalOpen} />
       <CreditsModal open={creditsOpen} onOpenChange={setCreditsOpen} />
     </>
   );

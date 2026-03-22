@@ -48,7 +48,7 @@ export function CreditsModal({ open, onOpenChange }: CreditsModalProps) {
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-90">
+      <DialogContent showCloseButton={false} className="max-w-90">
         <DialogHeader>
           <DialogTitle>Add credits</DialogTitle>
           <DialogDescription>

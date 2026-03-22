@@ -27,16 +27,122 @@ import { AuthModal } from "@/components/auth-modal";
 import { CreditsModal } from "@/components/credits-modal";
 import { resizeAndToBase64, formatFileSize } from "@/lib/utils";
 import { MAX_FILES } from "@/lib/constants";
+import { Skeleton } from "@/components/ui/skeleton";
+import {
+  HoverCard,
+  HoverCardContent,
+  HoverCardTrigger,
+} from "@/components/ui/hover-card";
 
 type FileEntry = { file: File; url: string };
+
+export type ChannelThumbnail = {
+  videoId: string;
+  url: string;
+  title: string;
+};
+
+export type ChannelReference = {
+  handle: string;
+  thumbnails: ChannelThumbnail[];
+};
+
+type ChannelWidget =
+  | { stage: "loading"; handle: string }
+  | { stage: "found"; ref: ChannelReference }
+  | { stage: "empty"; handle: string }
+  | { stage: "error"; handle: string }
+  | null;
+
+const MENTION_RE = /@([\w.-]*)/;
+const DEBOUNCE_MS = 600;
+
+type TextSegment =
+  | { type: "plain"; text: string }
+  | { type: "active"; text: string }
+  | { type: "extra"; text: string };
+
+/** Split text into plain, active @mention, and extra @mention segments */
+function getTextSegments(
+  text: string,
+  activeHandle: string | null,
+): TextSegment[] {
+  const re = /@([\w.-]*)/g;
+  const segments: TextSegment[] = [];
+  let last = 0;
+  let activeConsumed = false;
+  let m: RegExpExecArray | null;
+
+  while ((m = re.exec(text)) !== null) {
+    if (m.index > last)
+      segments.push({ type: "plain", text: text.slice(last, m.index) });
+
+    const mentionText = m[0];
+    const handle = m[1];
+    const isActive =
+      !activeConsumed &&
+      activeHandle !== null &&
+      (activeHandle === "" || handle === activeHandle);
+
+    if (isActive) {
+      segments.push({ type: "active", text: mentionText });
+      activeConsumed = true;
+    } else {
+      segments.push({ type: "extra", text: mentionText });
+    }
+    last = m.index + mentionText.length;
+  }
+
+  if (last < text.length)
+    segments.push({ type: "plain", text: text.slice(last) });
+  return segments;
+}
+
+function MentionStatusChip({
+  markClass,
+  textClass,
+  message,
+  children,
+}: {
+  markClass: string;
+  textClass: string;
+  message: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <HoverCard>
+      <HoverCardTrigger
+        delay={100}
+        closeDelay={0}
+        render={
+          <mark
+            className={`${markClass} rounded-sm not-italic cursor-default pointer-events-auto`}
+          />
+        }
+      >
+        {children}
+      </HoverCardTrigger>
+      <HoverCardContent className="w-auto p-2" side="top" align="start">
+        <span className={`text-xs ${textClass}`}>{message}</span>
+      </HoverCardContent>
+    </HoverCard>
+  );
+}
 
 export function GeneratePrompt() {
   const [prompt, setPrompt] = useState("");
   const [fileEntries, setFileEntries] = useState<FileEntry[]>([]);
   const [authModalOpen, setAuthModalOpen] = useState(false);
   const [creditsModalOpen, setCreditsModalOpen] = useState(false);
+  const [channelWidget, setChannelWidget] = useState<ChannelWidget>(null);
+
   const pendingActionRef = useRef<"submit" | "attach" | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const overlayRef = useRef<HTMLDivElement>(null);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const inflightRef = useRef<string | null>(null); // handle currently being fetched
+  const pendingHandleRef = useRef<string | null>(null); // handle waiting for debounce
+
   const { data: session, isPending: sessionPending } = authClient.useSession();
   const {
     versions,
@@ -91,13 +197,110 @@ export function GeneratePrompt() {
     });
   }
 
+  async function fetchChannel(handle: string) {
+    inflightRef.current = handle;
+    try {
+      const res = await fetch(
+        `/api/youtube/channel?handle=${encodeURIComponent(handle)}`,
+      );
+      if (inflightRef.current !== handle) return;
+      const data = await res.json();
+      if (!res.ok) {
+        setChannelWidget({ stage: "error", handle });
+        return;
+      }
+      const ref = data as ChannelReference;
+      if (ref.thumbnails.length === 0) {
+        setChannelWidget({ stage: "empty", handle });
+      } else {
+        setChannelWidget({ stage: "found", ref });
+      }
+    } catch {
+      if (inflightRef.current === handle)
+        setChannelWidget({ stage: "error", handle });
+    } finally {
+      if (inflightRef.current === handle) inflightRef.current = null;
+    }
+  }
+
+  function handleValueChange(value: string) {
+    setPrompt(value);
+    if (pendingPrompt !== null) setPendingPrompt(value.trim() || null);
+
+    const match = value.match(MENTION_RE);
+    const handle = match ? match[1] : null; // "" for bare @, null for no @
+
+    if (handle === null) {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+      inflightRef.current = null;
+      pendingHandleRef.current = null;
+      setChannelWidget(null);
+      return;
+    }
+
+    if (handle === "") {
+      // Bare @ — show skeleton immediately, nothing to fetch yet
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+      pendingHandleRef.current = null;
+      if (channelWidget?.stage !== "loading" || channelWidget.handle !== "") {
+        setChannelWidget({ stage: "loading", handle: "" });
+      }
+      return;
+    }
+
+    // Already debouncing for this exact handle — don't restart
+    if (handle === pendingHandleRef.current) return;
+
+    // Already fully resolved for this handle — nothing to do
+    const resolvedHandle =
+      channelWidget?.stage === "found"
+        ? channelWidget.ref.handle
+        : channelWidget?.stage === "error" || channelWidget?.stage === "empty"
+          ? channelWidget.handle
+          : null;
+    if (handle === resolvedHandle) return;
+
+    // New handle — show skeleton chip immediately, debounce only the fetch
+    pendingHandleRef.current = handle;
+    inflightRef.current = null;
+    setChannelWidget({ stage: "loading", handle });
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => {
+      pendingHandleRef.current = null;
+      fetchChannel(handle);
+    }, DEBOUNCE_MS);
+  }
+
+  const channelRef =
+    channelWidget?.stage === "found" ? channelWidget.ref : null;
+
+  const activeHandle =
+    channelWidget === null
+      ? null
+      : channelWidget.stage === "found"
+        ? channelWidget.ref.handle
+        : channelWidget.handle;
+
+  const isError = channelWidget?.stage === "error";
+  const isEmpty = channelWidget?.stage === "empty";
+  const textSegments = /@/.test(prompt)
+    ? getTextSegments(prompt, activeHandle)
+    : null;
+
   const doSubmit = useCallback(
     async (promptValue: string) => {
-      if ((!promptValue.trim() && fileEntries.length === 0) || loading) return;
+      if (
+        (!promptValue.trim() && fileEntries.length === 0 && !channelRef) ||
+        loading
+      )
+        return;
       const trimmed = promptValue.trim();
       const entriesToSubmit = fileEntries;
+      const channelRefSnapshot = channelRef;
       setPrompt("");
       setFileEntries([]);
+      setChannelWidget(null);
+      if (debounceRef.current) clearTimeout(debounceRef.current);
       entriesToSubmit.forEach((e) => URL.revokeObjectURL(e.url));
       startGenerating();
 
@@ -125,6 +328,11 @@ export function GeneratePrompt() {
               : undefined,
             referenceImages:
               referenceImages.length > 0 ? referenceImages : undefined,
+            channelThumbnailUrls:
+              channelRefSnapshot && channelRefSnapshot.thumbnails.length > 0
+                ? channelRefSnapshot.thumbnails.map((t) => t.url)
+                : undefined,
+            channelHandle: channelRefSnapshot?.handle,
           }),
         });
         const data = await res.json();
@@ -152,6 +360,7 @@ export function GeneratePrompt() {
     },
     [
       fileEntries,
+      channelRef,
       loading,
       versions,
       selectedVersionId,
@@ -162,15 +371,32 @@ export function GeneratePrompt() {
     ],
   );
 
+  const effectivePrompt = prompt.replace(/@[\w.-]*/g, "").trim();
+  const hasExtraMentions =
+    textSegments?.some((s) => s.type === "extra") ?? false;
+  const hasContent =
+    (!!effectivePrompt || fileEntries.length > 0) &&
+    !hasExtraMentions &&
+    channelWidget?.stage !== "error" &&
+    channelWidget?.stage !== "loading" &&
+    channelWidget?.stage !== "empty";
+
   const handleSubmit = useCallback(async () => {
-    if ((!prompt.trim() && fileEntries.length === 0) || loading) return;
+    if (!hasContent || loading) return;
     if (!session) {
-      if (prompt.trim()) setPendingPrompt(prompt.trim());
+      if (effectivePrompt) setPendingPrompt(effectivePrompt);
       setAuthModalOpen(true);
       return;
     }
-    doSubmit(prompt);
-  }, [prompt, fileEntries, loading, session, setPendingPrompt, doSubmit]);
+    doSubmit(effectivePrompt);
+  }, [
+    hasContent,
+    effectivePrompt,
+    loading,
+    session,
+    setPendingPrompt,
+    doSubmit,
+  ]);
 
   useEffect(() => {
     if (sessionPending || !session || !pendingPrompt) return;
@@ -178,6 +404,12 @@ export function GeneratePrompt() {
     setPrompt(pendingPrompt);
     doSubmit(pendingPrompt);
   }, [sessionPending, session, pendingPrompt, setPendingPrompt, doSubmit]);
+
+  useEffect(() => {
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+    };
+  }, []);
 
   function handlePaste(e: React.ClipboardEvent) {
     const imageFiles = Array.from(e.clipboardData.items)
@@ -199,11 +431,7 @@ export function GeneratePrompt() {
         <FileUpload onFilesAdded={addFiles} accept="image/*" disabled={loading}>
           <PromptInput
             value={prompt}
-            onValueChange={(value) => {
-              setPrompt(value);
-              if (pendingPrompt !== null)
-                setPendingPrompt(value.trim() || null);
-            }}
+            onValueChange={handleValueChange}
             onSubmit={handleSubmit}
             onPaste={handlePaste}
             isLoading={loading}
@@ -245,11 +473,133 @@ export function GeneratePrompt() {
                 ))}
               </div>
             )}
-            <PromptInputTextarea
-              ref={textareaRef}
-              placeholder={placeholder}
-              autoFocus
-            />
+            <div className="relative">
+              <div
+                ref={overlayRef}
+                aria-hidden
+                className="pointer-events-none absolute inset-0 overflow-hidden whitespace-pre-wrap wrap-break-word px-2 py-2 text-base leading-6 text-primary"
+              >
+                {textSegments
+                  ? textSegments.map((p: TextSegment, i: number) => {
+                      if (p.type === "plain")
+                        return <span key={i}>{p.text}</span>;
+
+                      if (p.type === "extra") {
+                        return (
+                          <MentionStatusChip
+                            key={i}
+                            markClass="bg-destructive/15 text-destructive"
+                            textClass="text-destructive"
+                            message="Only one channel can be referenced per message"
+                          >
+                            {p.text}
+                          </MentionStatusChip>
+                        );
+                      }
+
+                      // type === "active"
+                      if (channelRef) {
+                        return (
+                          <HoverCard key={i}>
+                            <HoverCardTrigger
+                              delay={200}
+                              closeDelay={100}
+                              render={
+                                <mark className="bg-channel text-channel-foreground rounded-sm not-italic cursor-default pointer-events-auto" />
+                              }
+                            >
+                              {p.text}
+                            </HoverCardTrigger>
+                            <HoverCardContent
+                              className="w-72 p-2"
+                              side="top"
+                              align="start"
+                            >
+                              <div className="grid grid-cols-3 gap-1.5 select-none">
+                                {channelRef.thumbnails
+                                  .slice(0, 3)
+                                  .map((thumb) => (
+                                    <img
+                                      key={thumb.videoId}
+                                      src={thumb.url}
+                                      alt={thumb.title}
+                                      className="aspect-video w-full rounded-sm object-cover"
+                                      draggable={false}
+                                    />
+                                  ))}
+                              </div>
+                            </HoverCardContent>
+                          </HoverCard>
+                        );
+                      }
+                      if (isError) {
+                        return (
+                          <MentionStatusChip
+                            key={i}
+                            markClass="bg-destructive/15 text-destructive"
+                            textClass="text-destructive"
+                            message="Channel not found"
+                          >
+                            {p.text}
+                          </MentionStatusChip>
+                        );
+                      }
+                      if (isEmpty) {
+                        return (
+                          <MentionStatusChip
+                            key={i}
+                            markClass="bg-destructive/15 text-destructive"
+                            textClass="text-destructive"
+                            message="No videos found"
+                          >
+                            {p.text}
+                          </MentionStatusChip>
+                        );
+                      }
+                      // loading stage — show skeleton grid on hover
+                      return (
+                        <HoverCard key={i}>
+                          <HoverCardTrigger
+                            delay={200}
+                            closeDelay={100}
+                            render={
+                              <mark className="bg-muted text-muted-foreground rounded-sm not-italic animate-pulse cursor-default pointer-events-auto" />
+                            }
+                          >
+                            {p.text}
+                          </HoverCardTrigger>
+                          <HoverCardContent
+                            className="w-72 p-2"
+                            side="top"
+                            align="start"
+                          >
+                            <div className="grid grid-cols-3 gap-1.5">
+                              {Array.from({ length: 3 }).map((_, idx) => (
+                                <Skeleton
+                                  key={idx}
+                                  className="aspect-video w-full rounded-sm"
+                                />
+                              ))}
+                            </div>
+                          </HoverCardContent>
+                        </HoverCard>
+                      );
+                    })
+                  : prompt}
+              </div>
+              <PromptInputTextarea
+                ref={textareaRef}
+                placeholder={placeholder}
+                autoFocus
+                className="caret-foreground text-transparent"
+                onScroll={() => {
+                  if (overlayRef.current && textareaRef.current) {
+                    overlayRef.current.scrollTop =
+                      textareaRef.current.scrollTop;
+                  }
+                }}
+              />
+            </div>
             <PromptInputActions className="justify-between px-1 pb-1">
               <Tooltip>
                 <TooltipTrigger
@@ -286,9 +636,7 @@ export function GeneratePrompt() {
               <PromptInputAction tooltip="Send">
                 <Button
                   onClick={handleSubmit}
-                  disabled={
-                    loading || (!prompt.trim() && fileEntries.length === 0)
-                  }
+                  disabled={loading || !hasContent}
                   size="icon-lg"
                 >
                   <ArrowUp size={18} />

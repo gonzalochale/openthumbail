@@ -6,6 +6,7 @@ import { auth } from "@/lib/auth";
 import { deductCredit, refundCredit } from "@/lib/credits";
 import { headers } from "next/headers";
 import {
+  CHANNEL_STYLE_INSTRUCTION,
   CREATE_IMAGES,
   IMAGE_MODEL,
   SAFETY_MODEL,
@@ -36,14 +37,44 @@ export async function POST(req: Request) {
   }
 
   const body = await req.json();
-  const { prompt, previousVersion, referenceImages } = body as {
+  const {
+    prompt,
+    previousVersion,
+    referenceImages,
+    channelThumbnailUrls,
+    channelHandle,
+  } = body as {
     prompt: string;
     previousVersion?: PreviousVersion;
     referenceImages?: ReferenceImage[];
+    channelThumbnailUrls?: string[];
+    channelHandle?: string;
   };
 
-  if (!prompt && !referenceImages?.length) {
+  if (!prompt?.trim()) {
     return Response.json({ error: "Prompt is required" }, { status: 400 });
+  }
+
+  let allReferenceImages: ReferenceImage[] = referenceImages ?? [];
+  if (channelThumbnailUrls && channelThumbnailUrls.length > 0) {
+    const fetched = await Promise.allSettled(
+      channelThumbnailUrls.map(async (url) => {
+        const r = await fetch(url);
+        if (!r.ok) throw new Error(`Failed to fetch thumbnail: ${url}`);
+        const buf = await r.arrayBuffer();
+        return {
+          imageBase64: Buffer.from(buf).toString("base64"),
+          mimeType: "image/jpeg",
+        } satisfies ReferenceImage;
+      }),
+    );
+    const resolved = fetched
+      .filter(
+        (r): r is PromiseFulfilledResult<ReferenceImage> =>
+          r.status === "fulfilled",
+      )
+      .map((r) => r.value);
+    allReferenceImages = [...allReferenceImages, ...resolved];
   }
 
   const apiKey = process.env.GOOGLE_AI_STUDIO_API_KEY;
@@ -101,22 +132,51 @@ export async function POST(req: Request) {
       );
     }
 
-    const hasReferenceImages = referenceImages && referenceImages.length > 0;
+    const hasReferenceImages = allReferenceImages.length > 0;
+    const hasChannelThumbs =
+      channelThumbnailUrls && channelThumbnailUrls.length > 0;
     const hasPreviousVersion = !!previousVersion;
 
     let imagePromptText = safePrompt;
 
     if (hasPreviousVersion && hasReferenceImages) {
+      const userRefCount = (referenceImages ?? []).length;
+      const channelRefCount = allReferenceImages.length - userRefCount;
+      let refDesc = "";
+      if (userRefCount > 0 && channelRefCount > 0) {
+        refDesc =
+          `${userRefCount} user-provided visual reference(s), followed by ${channelRefCount} thumbnails from @${channelHandle ?? "unknown"} ` +
+          `used as style-only references (colors, composition, typography — no faces or specific elements).`;
+      } else if (channelRefCount > 0) {
+        refDesc = `${channelRefCount} thumbnails from @${channelHandle ?? "unknown"} used as style-only references. ${CHANNEL_STYLE_INSTRUCTION}`;
+      } else {
+        refDesc = `${userRefCount} visual reference image(s) provided by the user.`;
+      }
       imagePromptText =
-        `The FIRST image is the previously generated thumbnail — use it as the base to edit and improve upon based on the instruction below.\n` +
-        `The next ${referenceImages.length} image(s) are visual references provided by the user (e.g. branding, style, composition inspiration) — do NOT reproduce them directly, use them as context.\n\n` +
+        `The FIRST image is the previously generated thumbnail — use it as the base to edit based on the instruction below.\n` +
+        `The remaining images are ${refDesc}\n\n` +
         `Instruction: ${imagePromptText}`;
     } else if (hasPreviousVersion) {
       imagePromptText = `The attached image is the previously generated thumbnail. Edit and improve it based on this instruction: ${imagePromptText}`;
     } else if (hasReferenceImages) {
+      const channelRefCount = hasChannelThumbs
+        ? channelThumbnailUrls.length
+        : 0;
+      const userRefCount = allReferenceImages.length - channelRefCount;
+      let refDesc = "";
+      if (userRefCount > 0 && channelRefCount > 0) {
+        refDesc =
+          `The first ${userRefCount} image(s) are user-provided visual references. ` +
+          `The last ${channelRefCount} image(s) are thumbnails from @${channelHandle ?? "unknown"} — use them for style only (colors, composition, typography). ` +
+          `Do NOT copy faces, people, specific objects, or text from them.`;
+      } else if (channelRefCount > 0) {
+        refDesc = `The attached images are thumbnails from @${channelHandle ?? "unknown"}. ${CHANNEL_STYLE_INSTRUCTION}`;
+      } else {
+        refDesc = `The attached image(s) are visual references provided by the user (branding, style, colors, composition).`;
+      }
       imagePromptText =
-        `The attached image(s) are visual references provided by the user (e.g. branding, style, colors, faces, composition). ` +
-        `Use them as context to generate a new YouTube thumbnail. Do NOT copy them — create an original thumbnail inspired by them.\n\n` +
+        `${refDesc}\n\n` +
+        `Generate a new original YouTube thumbnail.\n\n` +
         `Instruction: ${imagePromptText}`;
     }
 
@@ -125,7 +185,7 @@ export async function POST(req: Request) {
         ? [Buffer.from(previousVersion.imageBase64, "base64")]
         : []),
       ...(hasReferenceImages
-        ? referenceImages.map((r) => Buffer.from(r.imageBase64, "base64"))
+        ? allReferenceImages.map((r) => Buffer.from(r.imageBase64, "base64"))
         : []),
     ];
 

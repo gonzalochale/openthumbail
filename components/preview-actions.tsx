@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowDown, Check } from "lucide-react";
+import { ArrowDown, ChevronLeft, ChevronRight } from "lucide-react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { useRef } from "react";
 import { Button } from "@/components/ui/button";
@@ -20,36 +20,7 @@ import {
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { TextShimmer } from "@/components//ui/text-shimmer";
 import { TextLoop } from "@/components//ui/text-loop";
-
-const GENERATING_PHRASES = [
-  "Adjusting details...",
-  "Refining colors...",
-  "Applying styles...",
-  "Almost there...",
-  "Adding depth...",
-  "Balancing contrast...",
-  "Enhancing lighting...",
-  "Fine-tuning layout...",
-  "Sharpening edges...",
-  "Polishing textures...",
-  "Optimizing composition...",
-  "Rendering pixels...",
-  "Crafting masterpiece...",
-  "Infusing creativity...",
-  "Bringing vision to life...",
-  "Transforming ideas...",
-  "Creating magic...",
-  "Unleashing imagination...",
-  "Blending elements...",
-  "Perfecting design...",
-  "Capturing essence...",
-  "Elevating aesthetics...",
-  "Sculpting visuals...",
-  "Harmonizing colors...",
-  "Weaving details...",
-  "Balancing hues...",
-  "Refining composition...",
-];
+import { GENERATING_PHRASES } from "@/lib/constants";
 
 export function PreviewActions() {
   const shouldReduceMotion = useReducedMotion();
@@ -127,42 +98,66 @@ export function PreviewActions() {
               exit={{ y: -8, opacity: 0 }}
               transition={{ duration: 0.15, ease: [0.215, 0.61, 0.355, 1] }}
             >
-              <DropdownMenu>
-                <DropdownMenuTrigger
-                  render={
-                    <Button
-                      variant="ghost"
-                      className="font-mono text-sm text-muted-foreground"
-                    />
-                  }
+              <div className="flex items-center">
+                <Button
+                  variant="ghost"
+                  size="icon-lg"
+                  disabled={selectedVersion!.id === 0}
+                  onClick={() => selectVersion(selectedVersion!.id - 1)}
                 >
-                  v{selectedVersion!.id}
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="start" className="w-32 p-0">
-                  <ScrollArea
-                    className="max-h-40"
-                    scrollbarClassName="data-vertical:w-2"
+                  <ChevronLeft size={16} />
+                </Button>
+                <DropdownMenu>
+                  <DropdownMenuTrigger
+                    render={
+                      <Button
+                        variant="ghost"
+                        className="font-mono text-sm text-muted-foreground px-1.5"
+                      />
+                    }
                   >
-                    <div className="p-1">
-                      {[...versions].reverse().map((v) => (
-                        <DropdownMenuItem
-                          key={v.id}
-                          ref={
-                            v.id === selectedVersionId
-                              ? (el) => el?.scrollIntoView({ block: "nearest" })
-                              : undefined
-                          }
-                          onClick={() => selectVersion(v.id)}
-                          className="font-mono justify-between"
-                        >
-                          v{v.id}
-                          {v.id === selectedVersionId && <Check data-icon />}
-                        </DropdownMenuItem>
-                      ))}
-                    </div>
-                  </ScrollArea>
-                </DropdownMenuContent>
-              </DropdownMenu>
+                    v{selectedVersion!.id}
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="start" className="w-44 p-0">
+                    <ScrollArea
+                      className="max-h-64"
+                      scrollbarClassName="data-vertical:w-2"
+                    >
+                      <div className="p-1.5 flex flex-col gap-1">
+                        {[...versions].reverse().map((v) => (
+                          <DropdownMenuItem
+                            key={v.id}
+                            ref={
+                              v.id === selectedVersionId
+                                ? (el) =>
+                                    el?.scrollIntoView({ block: "nearest" })
+                                : undefined
+                            }
+                            onClick={() => selectVersion(v.id)}
+                            className={`gap-2 py-2 cursor-pointer justify-between${v.id === selectedVersionId ? " bg-accent text-accent-foreground" : ""}`}
+                          >
+                            <span className="font-mono text-xs">v{v.id}</span>
+                            <img
+                              src={`data:${v.mimeType};base64,${v.imageBase64}`}
+                              alt={`v${v.id}`}
+                              className="aspect-video w-16 shrink-0 rounded-sm object-cover select-none"
+                              draggable={false}
+                            />
+                          </DropdownMenuItem>
+                        ))}
+                      </div>
+                    </ScrollArea>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+                <Button
+                  variant="ghost"
+                  size="icon-lg"
+                  disabled={selectedVersion!.id === versions.length - 1}
+                  onClick={() => selectVersion(selectedVersion!.id + 1)}
+                >
+                  <ChevronRight size={16} />
+                </Button>
+              </div>
             </motion.div>
           )}
         </AnimatePresence>

@@ -18,7 +18,6 @@ import {
   fetchImages,
   type ChannelRef,
   type PreviousVersion,
-  type ReferenceImage,
   type VideoRef,
 } from "@/lib/build-image-prompt";
 
@@ -35,14 +34,12 @@ export async function POST(req: Request) {
   }
 
   const body = await req.json();
-  const { prompt, previousVersion, referenceImages, channelRefs, videoRefs } =
-    body as {
-      prompt: string;
-      previousVersion?: PreviousVersion;
-      referenceImages?: ReferenceImage[];
-      channelRefs?: ChannelRef[];
-      videoRefs?: VideoRef[];
-    };
+  const { prompt, previousVersion, channelRefs, videoRefs } = body as {
+    prompt: string;
+    previousVersion?: PreviousVersion;
+    channelRefs?: ChannelRef[];
+    videoRefs?: VideoRef[];
+  };
 
   if (!prompt?.trim()) {
     return Response.json({ error: "Message is required" }, { status: 400 });
@@ -62,11 +59,16 @@ export async function POST(req: Request) {
     Promise.all((videoRefs ?? []).map((vr) => fetchImages([vr.url]))),
   ]);
 
-  const totalReferenceCount = [
-    ...(referenceImages ?? []),
+  const allRefImages = [
     ...channelImageGroups.flat(),
     ...videoImageGroups.flat(),
-  ].length;
+  ];
+  if (allRefImages.length > MAX_FILES) {
+    return Response.json(
+      { error: `Too many reference images (max ${MAX_FILES})` },
+      { status: 400 },
+    );
+  }
 
   const apiKey = process.env.GOOGLE_AI_STUDIO_API_KEY;
   if (!apiKey) {
@@ -122,21 +124,12 @@ export async function POST(req: Request) {
       );
     }
 
-    const clampedReferenceImages = (referenceImages ?? []).slice(
-      0,
-      Math.max(
-        0,
-        MAX_FILES - (totalReferenceCount - (referenceImages ?? []).length),
-      ),
-    );
-
     const { text, images } = buildImagePrompt({
       safePrompt,
       channelRefs,
       channelImageGroups,
       videoRefs,
       videoImageGroups,
-      referenceImages: clampedReferenceImages,
       previousVersion,
     });
 

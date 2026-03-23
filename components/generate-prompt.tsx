@@ -14,20 +14,20 @@ import {
   PromptInputAction,
 } from "@/components/prompt";
 import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
-import {
   FileUpload,
   FileUploadTrigger,
   FileUploadContent,
 } from "@/components/file-upload";
+import {
+  HoverCard,
+  HoverCardContent,
+  HoverCardTrigger,
+} from "@/components/ui/hover-card";
 import { authClient } from "@/lib/auth-client";
 import { AuthModal } from "@/components/auth-modal";
 import { CreditsModal } from "@/components/credits-modal";
-import { resizeAndToBase64, formatFileSize } from "@/lib/utils";
-import { MAX_FILES, MAX_PROMPT_LENGTH } from "@/lib/constants";
+import { resizeAndToBase64 } from "@/lib/utils";
+import { MAX_PROMPT_LENGTH } from "@/lib/constants";
 import {
   type ChannelReference,
   stripVideoChips,
@@ -95,20 +95,13 @@ export function GeneratePrompt() {
       setAuthModalOpen(true);
       return;
     }
-    const remaining = MAX_FILES - fileEntries.length - countSlots();
-    if (remaining <= 0) {
-      toast(`You've reached the ${MAX_FILES} reference image limit`);
-      return;
-    }
-    if (newFiles.length > remaining) {
-      toast(
-        `Only ${remaining} reference slot${remaining === 1 ? "" : "s"} left (${MAX_FILES} max total)`,
-      );
-    }
-    const toAdd = newFiles
-      .slice(0, remaining)
-      .map((file) => ({ file, url: URL.createObjectURL(file) }));
-    setFileEntries((prev) => [...prev, ...toAdd]);
+    if (selectedVersionId !== null) return;
+    if (newFiles.length === 0) return;
+    const prev = fileEntries[0];
+    if (prev) URL.revokeObjectURL(prev.url);
+    setFileEntries([
+      { file: newFiles[0], url: URL.createObjectURL(newFiles[0]) },
+    ]);
   }
 
   function removeFile(index: number) {
@@ -119,7 +112,7 @@ export function GeneratePrompt() {
   }
 
   function handleValueChange(value: string) {
-    const processed = processValueChange(value, fileEntries.length);
+    const processed = processValueChange(value, 0);
     setPrompt(processed);
     if (pendingPrompt !== null) setPendingPrompt(processed.trim() || null);
   }
@@ -173,30 +166,37 @@ export function GeneratePrompt() {
       entriesToSubmit.forEach((e) => URL.revokeObjectURL(e.url));
       startGenerating();
 
-      const previousVersion = versions.find((v) => v.id === selectedVersionId);
+      const selectedVersion = versions.find((v) => v.id === selectedVersionId);
 
       try {
-        const referenceImages = await Promise.all(
-          entriesToSubmit.map(async ({ file }) => ({
-            imageBase64: await resizeAndToBase64(file),
+        let previousVersion:
+          | {
+              imageBase64: string;
+              mimeType: string;
+              enhancedPrompt: string | null;
+            }
+          | undefined;
+
+        if (selectedVersion) {
+          previousVersion = {
+            imageBase64: selectedVersion.imageBase64,
+            mimeType: selectedVersion.mimeType,
+            enhancedPrompt: selectedVersion.enhancedPrompt,
+          };
+        } else if (entriesToSubmit.length > 0) {
+          previousVersion = {
+            imageBase64: await resizeAndToBase64(entriesToSubmit[0].file),
             mimeType: "image/jpeg",
-          })),
-        );
+            enhancedPrompt: null,
+          };
+        }
 
         const res = await fetch("/api/generate", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             prompt: sendPrompt,
-            previousVersion: previousVersion
-              ? {
-                  imageBase64: previousVersion.imageBase64,
-                  mimeType: previousVersion.mimeType,
-                  enhancedPrompt: previousVersion.enhancedPrompt,
-                }
-              : undefined,
-            referenceImages:
-              referenceImages.length > 0 ? referenceImages : undefined,
+            previousVersion,
             channelRefs: channelRefs.length > 0 ? channelRefs : undefined,
             videoRefs: videoRefs.length > 0 ? videoRefs : undefined,
           }),
@@ -343,7 +343,12 @@ export function GeneratePrompt() {
   return (
     <div className="absolute bottom-0 sm:bottom-5 sm:px-5 w-full flex justify-center pointer-events-none">
       <div className="mx-auto w-full max-w-2xl pointer-events-auto">
-        <FileUpload onFilesAdded={addFiles} accept="image/*" disabled={loading}>
+        <FileUpload
+          onFilesAdded={addFiles}
+          accept="image/*"
+          multiple={false}
+          disabled={loading || selectedVersionId !== null}
+        >
           <PromptInput
             value={prompt}
             onValueChange={handleValueChange}
@@ -375,33 +380,52 @@ export function GeneratePrompt() {
                           : { opacity: 0, scale: 0.85 }
                       }
                       transition={{ type: "spring", bounce: 0, duration: 0.25 }}
-                      className="bg-background border flex items-center gap-2 rounded-lg p-1.5 pr-2.5 text-sm"
+                      className="bg-background border rounded-lg text-sm overflow-hidden"
                       onClick={(e) => e.stopPropagation()}
                     >
-                      <img
-                        src={url}
-                        alt={file.name}
-                        className="size-9 rounded-sm object-cover shrink-0"
-                      />
-                      <div className="flex flex-col min-w-0">
-                        <span className="max-w-10 truncate text-xs font-medium leading-tight">
-                          {file.name}
-                        </span>
-                        <span className="text-muted-foreground text-xs leading-tight">
-                          {formatFileSize(file.size)}
-                        </span>
-                      </div>
-                      <button
-                        onClick={() => removeFile(index)}
-                        className={
-                          buttonVariants({
-                            variant: "destructive",
-                            size: "icon-sm",
-                          }) + " ml-auto"
-                        }
-                      >
-                        <X className="size-3.5" />
-                      </button>
+                      <HoverCard>
+                        <HoverCardTrigger
+                          delay={200}
+                          closeDelay={100}
+                          render={
+                            <div className="flex items-center gap-1.5 pl-1.5 pr-2 py-1.5 cursor-default" />
+                          }
+                        >
+                          <img
+                            src={url}
+                            alt="Starting image"
+                            className="size-6 rounded-sm object-cover shrink-0"
+                            draggable={false}
+                          />
+                          <span className="text-xs font-medium leading-tight text-muted-foreground">
+                            Starting image
+                          </span>
+                          <button
+                            onClick={(e) => { e.stopPropagation(); removeFile(index); }}
+                            className={buttonVariants({
+                              variant: "ghost",
+                              size: "icon-sm",
+                            })}
+                          >
+                            <X className="size-3" />
+                          </button>
+                        </HoverCardTrigger>
+                        <HoverCardContent
+                          className="w-52 p-2"
+                          side="top"
+                          align="start"
+                        >
+                          <motion.img
+                            src={url}
+                            alt={file.name}
+                            className="aspect-video w-full rounded-sm object-cover"
+                            draggable={false}
+                            initial={shouldReduceMotion ? false : { opacity: 0, scale: 0.95 }}
+                            animate={{ opacity: 1, scale: 1 }}
+                            transition={{ duration: 0.18, ease: [0.25, 1, 0.5, 1] }}
+                          />
+                        </HoverCardContent>
+                      </HoverCard>
                     </motion.div>
                   ))}
                 </AnimatePresence>
@@ -432,38 +456,33 @@ export function GeneratePrompt() {
               />
             </div>
             <PromptInputActions className="justify-between px-1 pb-1">
-              <Tooltip>
-                <TooltipTrigger
-                  render={
-                    session ? (
-                      <FileUploadTrigger
-                        className={buttonVariants({
-                          variant: "ghost",
-                          size: "icon-lg",
-                        })}
-                        disabled={loading}
-                      >
-                        <Paperclip className="size-4" />
-                      </FileUploadTrigger>
-                    ) : (
-                      <button
-                        type="button"
-                        className={buttonVariants({
-                          variant: "ghost",
-                          size: "icon-lg",
-                        })}
-                        onClick={() => {
-                          pendingActionRef.current = "attach";
-                          setAuthModalOpen(true);
-                        }}
-                      >
-                        <Paperclip className="size-4" />
-                      </button>
-                    )
-                  }
-                />
-                <TooltipContent>Attach image</TooltipContent>
-              </Tooltip>
+              {session ? (
+                <FileUploadTrigger
+                  className={buttonVariants({
+                    variant: "secondary",
+                    size: "lg",
+                  })}
+                  disabled={loading || selectedVersionId !== null}
+                >
+                  <Paperclip className="size-4" />
+                  {fileEntries.length > 0 ? "Edit starting image" : "Add starting image"}
+                </FileUploadTrigger>
+              ) : (
+                <button
+                  type="button"
+                  className={buttonVariants({
+                    variant: "secondary",
+                    size: "lg",
+                  })}
+                  onClick={() => {
+                    pendingActionRef.current = "attach";
+                    setAuthModalOpen(true);
+                  }}
+                >
+                  <Paperclip className="size-4" />
+                  {fileEntries.length > 0 ? "Edit starting image" : "Add starting image"}
+                </button>
+              )}
               <PromptInputAction tooltip="Send">
                 <Button
                   onClick={handleSubmit}
@@ -478,9 +497,9 @@ export function GeneratePrompt() {
           <FileUploadContent>
             <div className="bg-background/90 m-4 w-full max-w-md rounded-2xl border p-8 shadow-lg text-center">
               <Paperclip className="text-muted-foreground mx-auto mb-3 size-8" />
-              <p className="font-medium">Drop images here</p>
+              <p className="font-medium">Drop starting image here</p>
               <p className="text-muted-foreground mt-1 text-sm">
-                Release to attach to your prompt
+                It will be used as the base for generation
               </p>
             </div>
           </FileUploadContent>

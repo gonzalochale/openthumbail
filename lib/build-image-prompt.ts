@@ -1,3 +1,8 @@
+import {
+  CHANNEL_STYLE_INSTRUCTION,
+  VIDEO_STYLE_INSTRUCTION,
+} from "@/lib/constants";
+
 export interface ReferenceImage {
   imageBase64: string;
   mimeType: string;
@@ -44,7 +49,6 @@ export function buildImagePrompt({
   channelImageGroups,
   videoRefs = [],
   videoImageGroups,
-  referenceImages = [],
   previousVersion,
 }: {
   safePrompt: string;
@@ -52,11 +56,9 @@ export function buildImagePrompt({
   channelImageGroups: ReferenceImage[][];
   videoRefs?: VideoRef[];
   videoImageGroups: ReferenceImage[][];
-  referenceImages?: ReferenceImage[];
   previousVersion?: PreviousVersion;
 }): { text: string; images: Buffer[] } {
   const allReferenceImages = [
-    ...referenceImages,
     ...channelImageGroups.flat(),
     ...videoImageGroups.flat(),
   ];
@@ -67,17 +69,6 @@ export function buildImagePrompt({
   let enriched = safePrompt;
   let imgIdx = hasPreviousVersion ? 2 : 1;
 
-  const userRefCount = referenceImages.length;
-  if (userRefCount > 0) {
-    const end = imgIdx + userRefCount - 1;
-    const range =
-      userRefCount === 1 ? `Image ${imgIdx}` : `Images ${imgIdx}–${end}`;
-    imageGuide.push(
-      `${range}: User-provided visual reference(s) (branding, style, colors, composition).`,
-    );
-    imgIdx += userRefCount;
-  }
-
   for (const [i, ch] of channelRefs.entries()) {
     const fetchedCount = channelImageGroups[i]?.length ?? 0;
     if (fetchedCount === 0) continue;
@@ -85,17 +76,14 @@ export function buildImagePrompt({
     const range =
       fetchedCount === 1 ? `Image ${imgIdx}` : `Images ${imgIdx}–${end}`;
     imageGuide.push(
-      `${range}: Thumbnails from @${ch.handle} — use for STYLE ONLY (colors, composition, typography; do NOT copy faces or specific objects).`,
+      `${range}: Thumbnails from @${ch.handle} — ${CHANNEL_STYLE_INSTRUCTION}`,
     );
     const pat = new RegExp(
       `@${ch.handle.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`,
       "gi",
     );
-    const hint =
-      fetchedCount === 1
-        ? `@${ch.handle} (image ${imgIdx})`
-        : `@${ch.handle} (images ${imgIdx}–${end})`;
-    enriched = enriched.replace(pat, hint);
+
+    enriched = enriched.replace(pat, "the style from the reference images");
     imgIdx += fetchedCount;
   }
 
@@ -103,26 +91,35 @@ export function buildImagePrompt({
     const fetchedCount = videoImageGroups[i]?.length ?? 0;
     if (fetchedCount === 0) continue;
     imageGuide.push(
-      `Image ${imgIdx}: Video thumbnail — use for STYLE ONLY (colors, composition, typography; do NOT copy faces or specific objects).`,
+      `Image ${imgIdx}: Video thumbnail — ${VIDEO_STYLE_INSTRUCTION}`,
     );
     imgIdx++;
   }
 
+  const photorealismPreamble = `Generate a high-quality, PHOTOREALISTIC YouTube thumbnail (16:9). Do NOT produce cartoons, illustrations, anime, or drawings unless the prompt explicitly requests that art style.`;
+  const thumbnailPostamble = `The result should look like a professional YouTube thumbnail: bold composition, high contrast, strong visual hierarchy, and immediately eye-catching.`;
+
   let imagePromptText = enriched;
 
   if (hasPreviousVersion) {
-    const prevLine = hasReferenceImages
-      ? `Image 1: Previously generated thumbnail — use as the base to edit.`
-      : null;
+    const prevLine = `Image 1: Previously generated thumbnail — this is the base to edit. Preserve ALL visual elements that are not explicitly changed: composition, colors, style, faces, text overlays, and layout. Apply ONLY the changes described in the instruction below.`;
     const guide = [prevLine, ...imageGuide].filter(Boolean).join("\n");
-    imagePromptText = guide
-      ? `${guide}\n\nInstruction: ${imagePromptText}`
-      : `The attached image is the previously generated thumbnail. Edit and improve it based on this instruction: ${imagePromptText}`;
+    imagePromptText =
+      `${guide}\n\n` +
+      `Instruction: ${imagePromptText}\n\n` +
+      thumbnailPostamble;
   } else if (hasReferenceImages) {
     imagePromptText =
+      `${photorealismPreamble}\n\n` +
       `${imageGuide.join("\n")}\n\n` +
       `Generate a new original YouTube thumbnail.\n\n` +
-      `Instruction: ${imagePromptText}`;
+      `Instruction: ${imagePromptText}\n\n` +
+      thumbnailPostamble;
+  } else {
+    imagePromptText =
+      `${photorealismPreamble}\n\n` +
+      `Instruction: ${imagePromptText}\n\n` +
+      thumbnailPostamble;
   }
 
   const allImages: Buffer[] = [

@@ -47,6 +47,17 @@ export function useYouTubeReferences({
   const fetchChannel = useCallback(async (handle: string) => {
     inflightHandlesRef.current.add(handle);
     try {
+      const totalUsed =
+        videoChips.filter((c) => c.stage !== "error").length +
+        videoInflightRef.current.size +
+        countChannelThumbnails(channelWidgets);
+      if (totalUsed >= MAX_FILES) {
+        setChannelWidgets((prev) =>
+          new Map(prev).set(handle, { stage: "error", handle }),
+        );
+        toast(`You've reached the ${MAX_FILES} reference image limit`);
+        return;
+      }
       const res = await fetch(
         `/api/youtube/channel?handle=${encodeURIComponent(handle)}`,
       );
@@ -75,14 +86,13 @@ export function useYouTubeReferences({
     } finally {
       inflightHandlesRef.current.delete(handle);
     }
-  }, []);
+  }, [videoChips, channelWidgets]);
 
   const addVideoChip = useCallback(
     async (videoId: string, originalUrl: string, fileEntriesCount: number) => {
       if (videoInflightRef.current.has(videoId)) return;
       if (videoChips.some((c) => c.videoId === videoId)) return;
       const totalUsed =
-        fileEntriesCount +
         videoChips.length +
         videoInflightRef.current.size +
         countChannelThumbnails(channelWidgets);

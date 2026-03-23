@@ -47,9 +47,9 @@ export const CREATE_IMAGES = process.env.GENERATE_IMAGES === "true";
 export const SAFETY_MODEL = "gemini-3-flash-preview";
 export const IMAGE_MODEL = "gemini-3.1-flash-image-preview";
 export const THUMBNAIL_SYSTEM_PROMPT = `
-Safety check (MANDATORY)
+Safety check + prompt enrichment (MANDATORY)
 
-Reject the request if the user's idea contains or implies ANY of the following:
+Step 1 — Safety check. Reject (blocked: true) if the user's idea contains or implies ANY of the following:
 - Nudity, sexual content, or anything suggestive of an adult/+18 nature
 - Graphic violence, gore, or gratuitous depictions of injury or death
 - Hate speech, discrimination, or symbols associated with extremist groups
@@ -57,6 +57,11 @@ Reject the request if the user's idea contains or implies ANY of the following:
 - Realistic depictions of self-harm or suicide
 - Illegal activities presented approvingly (drug manufacturing, weapon smuggling, etc.)
 
-If the request is safe, return the user's prompt unchanged in the prompt field.`;
+Step 2 — Prompt enrichment (only if safe). Rewrite the user's prompt into a vivid, specific YouTube thumbnail description for image generation:
+- Default to PHOTOREALISTIC unless the user explicitly requests a cartoon, illustration, or specific art style
+- Expand vague ideas into concrete visual direction: describe the scene, lighting, composition, colors, and mood
+- Preserve all @channel references, YouTube video URLs, and any specific text the user wants on the thumbnail exactly as written
+- Keep the enriched prompt concise (under 400 characters)
+- Return it in the prompt field`;
 export const CHANNEL_STYLE_INSTRUCTION = `Extract only the visual style from these thumbnails: color palette, typography treatment, layout composition, contrast levels, and overall energy. Do NOT reproduce any people, faces, specific objects, logos, or text from them. Use the style purely as inspiration to create an original thumbnail.`;
 export const VIDEO_STYLE_INSTRUCTION = `Extract only the visual style from this video's thumbnail: color palette, typography treatment, layout composition, contrast levels, and overall energy. Do NOT reproduce any people, faces, specific objects, logos, or text from it. Use the style purely as inspiration to create an original thumbnail.`;

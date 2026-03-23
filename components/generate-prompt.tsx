@@ -430,22 +430,35 @@ export function GeneratePrompt() {
       if (!promptValue.trim() || loading) return;
       const trimmed = promptValue.trim();
       const videoChipsSnapshot = videoChips;
-      const cleanPrompt = stripVideoChips(trimmed, videoChipsSnapshot);
-      if (!cleanPrompt) return;
-      const foundVideoUrls = videoChipsSnapshot
-        .filter((c): c is VideoChip & { stage: "found" } => c.stage === "found")
-        .map((c) => `https://i.ytimg.com/vi/${c.videoId}/hqdefault.jpg`);
+
+      const validationPrompt = stripVideoChips(
+        trimmed.replace(/@[\w.-]*/g, ""),
+        videoChipsSnapshot,
+      );
+      if (!validationPrompt) return;
+
+      const sendPrompt = trimmed
+        .replace(youtubeRe(), "")
+        .replace(/\s{2,}/g, " ")
+        .trim();
+
+      const foundVideos = videoChipsSnapshot.filter(
+        (c): c is VideoChip & { stage: "found" } => c.stage === "found",
+      );
+      const videoRefs = foundVideos.map((c) => ({
+        url: `https://i.ytimg.com/vi/${c.videoId}/hqdefault.jpg`,
+      }));
+
       const entriesToSubmit = fileEntries;
       const channelWidgetsSnapshot = channelWidgets;
       const foundChannels = [...channelWidgetsSnapshot.values()].filter(
         (w): w is { stage: "found"; ref: ChannelReference } =>
           w.stage === "found",
       );
-      const channelThumbnailUrls = foundChannels.flatMap((w) =>
-        w.ref.thumbnails.map((t) => t.url),
-      );
-      const channelHandleStr =
-        foundChannels.map((w) => w.ref.handle).join(", ") || undefined;
+      const channelRefs = foundChannels.map((w) => ({
+        urls: w.ref.thumbnails.map((t) => t.url),
+        handle: w.ref.handle,
+      }));
       setPrompt("");
       setFileEntries([]);
       setChannelWidgets(new Map());
@@ -472,7 +485,7 @@ export function GeneratePrompt() {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            prompt: cleanPrompt,
+            prompt: sendPrompt,
             previousVersion: previousVersion
               ? {
                   imageBase64: previousVersion.imageBase64,
@@ -482,13 +495,8 @@ export function GeneratePrompt() {
               : undefined,
             referenceImages:
               referenceImages.length > 0 ? referenceImages : undefined,
-            channelThumbnailUrls:
-              channelThumbnailUrls.length > 0
-                ? channelThumbnailUrls
-                : undefined,
-            channelHandle: channelHandleStr,
-            videoThumbnailUrls:
-              foundVideoUrls.length > 0 ? foundVideoUrls : undefined,
+            channelRefs: channelRefs.length > 0 ? channelRefs : undefined,
+            videoRefs: videoRefs.length > 0 ? videoRefs : undefined,
           }),
         });
         const data = await res.json();
@@ -504,7 +512,7 @@ export function GeneratePrompt() {
           imageBase64: data.image,
           mimeType: data.mimeType,
           enhancedPrompt: data.enhancedPrompt ?? null,
-          prompt: cleanPrompt,
+          prompt: sendPrompt,
           createdAt: Date.now(),
         });
       } catch (err) {
@@ -547,9 +555,10 @@ export function GeneratePrompt() {
       setAuthModalOpen(true);
       return;
     }
-    doSubmit(effectivePrompt);
+    doSubmit(prompt);
   }, [
     hasContent,
+    prompt,
     effectivePrompt,
     loading,
     session,
@@ -762,22 +771,24 @@ export function GeneratePrompt() {
                               align="start"
                             >
                               {isFound ? (
-                                <motion.img
-                                  src={`https://i.ytimg.com/vi/${chip.videoId}/hqdefault.jpg`}
-                                  alt={chip.title}
-                                  className="aspect-video w-full rounded-sm object-cover"
-                                  draggable={false}
-                                  initial={
-                                    shouldReduceMotion
-                                      ? false
-                                      : { opacity: 0, scale: 0.95 }
-                                  }
-                                  animate={{ opacity: 1, scale: 1 }}
-                                  transition={{
-                                    duration: 0.18,
-                                    ease: [0.25, 1, 0.5, 1],
-                                  }}
-                                />
+                                <>
+                                  <motion.img
+                                    src={`https://i.ytimg.com/vi/${chip.videoId}/hqdefault.jpg`}
+                                    alt={chip.title}
+                                    className="aspect-video w-full rounded-sm object-cover"
+                                    draggable={false}
+                                    initial={
+                                      shouldReduceMotion
+                                        ? false
+                                        : { opacity: 0, scale: 0.95 }
+                                    }
+                                    animate={{ opacity: 1, scale: 1 }}
+                                    transition={{
+                                      duration: 0.18,
+                                      ease: [0.25, 1, 0.5, 1],
+                                    }}
+                                  />
+                                </>
                               ) : (
                                 <Skeleton className="aspect-video w-full rounded-sm" />
                               )}
@@ -798,9 +809,9 @@ export function GeneratePrompt() {
                         );
                       }
                       const widget = channelWidgets.get(p.handle);
-                      const widgetRef =
-                        widget?.stage === "found" ? widget.ref : null;
-                      if (widgetRef) {
+                      const widgetFound =
+                        widget?.stage === "found" ? widget : null;
+                      if (widgetFound) {
                         return (
                           <HoverCard key={i}>
                             <HoverCardTrigger
@@ -818,7 +829,7 @@ export function GeneratePrompt() {
                               align="start"
                             >
                               <div className="flex flex-col gap-1.5 select-none">
-                                {widgetRef.thumbnails
+                                {widgetFound.ref.thumbnails
                                   .slice(0, 3)
                                   .map((thumb, j) => (
                                     <motion.img

@@ -6,14 +6,12 @@ import { auth } from "@/lib/auth";
 import { deductCredit, refundCredit } from "@/lib/credits";
 import { headers } from "next/headers";
 import {
-  CHANNEL_STYLE_INSTRUCTION,
   CREATE_IMAGES,
   IMAGE_MODEL,
   MAX_FILES,
   MAX_PROMPT_LENGTH,
   SAFETY_MODEL,
   THUMBNAIL_SYSTEM_PROMPT,
-  VIDEO_STYLE_INSTRUCTION,
 } from "@/lib/constants";
 
 interface ReferenceImage {
@@ -53,6 +51,15 @@ interface PreviousVersion {
   enhancedPrompt: string | null;
 }
 
+interface ChannelRef {
+  urls: string[];
+  handle: string;
+}
+
+interface VideoRef {
+  url: string;
+}
+
 export async function POST(req: Request) {
   const session = await auth.api.getSession({ headers: await headers() });
   if (!session) {
@@ -60,21 +67,14 @@ export async function POST(req: Request) {
   }
 
   const body = await req.json();
-  const {
-    prompt,
-    previousVersion,
-    referenceImages,
-    channelThumbnailUrls,
-    channelHandle,
-    videoThumbnailUrls,
-  } = body as {
-    prompt: string;
-    previousVersion?: PreviousVersion;
-    referenceImages?: ReferenceImage[];
-    channelThumbnailUrls?: string[];
-    channelHandle?: string;
-    videoThumbnailUrls?: string[];
-  };
+  const { prompt, previousVersion, referenceImages, channelRefs, videoRefs } =
+    body as {
+      prompt: string;
+      previousVersion?: PreviousVersion;
+      referenceImages?: ReferenceImage[];
+      channelRefs?: ChannelRef[];
+      videoRefs?: VideoRef[];
+    };
 
   if (!prompt?.trim()) {
     return Response.json({ error: "Message is required" }, { status: 400 });
@@ -89,14 +89,14 @@ export async function POST(req: Request) {
     );
   }
 
-  const [channelImages, videoImages] = await Promise.all([
-    channelThumbnailUrls?.length ? fetchImages(channelThumbnailUrls) : [],
-    videoThumbnailUrls?.length ? fetchImages(videoThumbnailUrls) : [],
+  const [channelImageGroups, videoImageGroups] = await Promise.all([
+    Promise.all((channelRefs ?? []).map((ch) => fetchImages(ch.urls))),
+    Promise.all((videoRefs ?? []).map((vr) => fetchImages([vr.url]))),
   ]);
   const allReferenceImages = [
     ...(referenceImages ?? []),
-    ...channelImages,
-    ...videoImages,
+    ...channelImageGroups.flat(),
+    ...videoImageGroups.flat(),
   ].slice(0, MAX_FILES);
 
   const apiKey = process.env.GOOGLE_AI_STUDIO_API_KEY;
@@ -155,85 +155,65 @@ export async function POST(req: Request) {
     }
 
     const hasReferenceImages = allReferenceImages.length > 0;
-    const hasChannelThumbs =
-      channelThumbnailUrls && channelThumbnailUrls.length > 0;
-    const hasVideoThumbs = videoThumbnailUrls && videoThumbnailUrls.length > 0;
     const hasPreviousVersion = !!previousVersion;
 
-    let imagePromptText = safePrompt;
+    const imageGuide: string[] = [];
+    let enriched = safePrompt;
+    let imgIdx = hasPreviousVersion ? 2 : 1;
 
-    if (hasPreviousVersion && hasReferenceImages) {
-      const userRefCount = (referenceImages ?? []).length;
-      const channelRefCount = hasChannelThumbs
-        ? channelThumbnailUrls.length
-        : 0;
-      const videoRefCount = hasVideoThumbs ? videoThumbnailUrls.length : 0;
-      let refDesc = "";
-      if (userRefCount > 0 && (channelRefCount > 0 || videoRefCount > 0)) {
-        const styleDesc = [
-          channelRefCount > 0
-            ? `${channelRefCount} thumbnails from @${channelHandle ?? "unknown"}`
-            : null,
-          videoRefCount > 0
-            ? `${videoRefCount} YouTube video thumbnail(s)`
-            : null,
-        ]
-          .filter(Boolean)
-          .join(" and ");
-        refDesc =
-          `${userRefCount} user-provided visual reference(s), followed by ${styleDesc} ` +
-          `used as style-only references (colors, composition, typography — no faces or specific elements).`;
-      } else if (channelRefCount > 0 && videoRefCount > 0) {
-        refDesc = `${channelRefCount} thumbnails from @${channelHandle ?? "unknown"} and ${videoRefCount} YouTube video thumbnail(s) used as style-only references. ${CHANNEL_STYLE_INSTRUCTION}`;
-      } else if (channelRefCount > 0) {
-        refDesc = `${channelRefCount} thumbnails from @${channelHandle ?? "unknown"} used as style-only references. ${CHANNEL_STYLE_INSTRUCTION}`;
-      } else if (videoRefCount > 0) {
-        refDesc = `${videoRefCount} YouTube video thumbnail(s) used as style-only references. ${VIDEO_STYLE_INSTRUCTION}`;
-      } else {
-        refDesc = `${userRefCount} visual reference image(s) provided by the user.`;
-      }
-      imagePromptText =
-        `The FIRST image is the previously generated thumbnail — use it as the base to edit based on the instruction below.\n` +
-        `The remaining images are ${refDesc}\n\n` +
-        `Instruction: ${imagePromptText}`;
-    } else if (hasPreviousVersion) {
-      imagePromptText = `The attached image is the previously generated thumbnail. Edit and improve it based on this instruction: ${imagePromptText}`;
+    const userRefCount = (referenceImages ?? []).length;
+    if (userRefCount > 0) {
+      const end = imgIdx + userRefCount - 1;
+      const range =
+        userRefCount === 1 ? `Image ${imgIdx}` : `Images ${imgIdx}–${end}`;
+      imageGuide.push(
+        `${range}: User-provided visual reference(s) (branding, style, colors, composition).`,
+      );
+      imgIdx += userRefCount;
+    }
+
+    for (const [i, ch] of (channelRefs ?? []).entries()) {
+      const fetchedCount = channelImageGroups[i]?.length ?? 0;
+      if (fetchedCount === 0) continue;
+      const end = imgIdx + fetchedCount - 1;
+      const range =
+        fetchedCount === 1 ? `Image ${imgIdx}` : `Images ${imgIdx}–${end}`;
+      const instruction = `${range}: Thumbnails from @${ch.handle} — use for STYLE ONLY (colors, composition, typography; do NOT copy faces or specific objects).`;
+      imageGuide.push(instruction);
+      const pat = new RegExp(
+        `@${ch.handle.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`,
+        "gi",
+      );
+      const hint =
+        fetchedCount === 1
+          ? `@${ch.handle} (image ${imgIdx})`
+          : `@${ch.handle} (images ${imgIdx}–${end})`;
+      enriched = enriched.replace(pat, hint);
+      imgIdx += fetchedCount;
+    }
+
+    for (const [i] of (videoRefs ?? []).entries()) {
+      const fetchedCount = videoImageGroups[i]?.length ?? 0;
+      if (fetchedCount === 0) continue;
+      const instruction = `Image ${imgIdx}: Video thumbnail — use for STYLE ONLY (colors, composition, typography; do NOT copy faces or specific objects).`;
+      imageGuide.push(instruction);
+      imgIdx++;
+    }
+
+    let imagePromptText = enriched;
+
+    if (hasPreviousVersion) {
+      const prevLine = hasReferenceImages
+        ? `Image 1: Previously generated thumbnail — use as the base to edit.`
+        : null;
+      const guide = [prevLine, ...imageGuide].filter(Boolean).join("\n");
+      imagePromptText = guide
+        ? `${guide}\n\nInstruction: ${imagePromptText}`
+        : `The attached image is the previously generated thumbnail. Edit and improve it based on this instruction: ${imagePromptText}`;
     } else if (hasReferenceImages) {
-      const channelRefCount = hasChannelThumbs
-        ? channelThumbnailUrls.length
-        : 0;
-      const videoRefCount = hasVideoThumbs ? videoThumbnailUrls.length : 0;
-      const userRefCount =
-        allReferenceImages.length - channelRefCount - videoRefCount;
-      let refDesc = "";
-      if (userRefCount > 0 && (channelRefCount > 0 || videoRefCount > 0)) {
-        const styleDesc = [
-          channelRefCount > 0
-            ? `${channelRefCount} thumbnail(s) from @${channelHandle ?? "unknown"} — use for style only`
-            : null,
-          videoRefCount > 0
-            ? `${videoRefCount} YouTube video thumbnail(s) — use for style only`
-            : null,
-        ]
-          .filter(Boolean)
-          .join("; ");
-        refDesc =
-          `The first ${userRefCount} image(s) are user-provided visual references. ` +
-          `The remaining image(s) are ${styleDesc} (colors, composition, typography). ` +
-          `Do NOT copy faces, people, specific objects, or text from them.`;
-      } else if (channelRefCount > 0 && videoRefCount > 0) {
-        refDesc =
-          `The first ${channelRefCount} image(s) are thumbnails from @${channelHandle ?? "unknown"}. ` +
-          `The remaining ${videoRefCount} image(s) are YouTube video thumbnails. ${CHANNEL_STYLE_INSTRUCTION}`;
-      } else if (channelRefCount > 0) {
-        refDesc = `The attached images are thumbnails from @${channelHandle ?? "unknown"}. ${CHANNEL_STYLE_INSTRUCTION}`;
-      } else if (videoRefCount > 0) {
-        refDesc = `The attached image(s) are thumbnails from specific YouTube videos. ${VIDEO_STYLE_INSTRUCTION}`;
-      } else {
-        refDesc = `The attached image(s) are visual references provided by the user (branding, style, colors, composition).`;
-      }
+      const guide = imageGuide.join("\n");
       imagePromptText =
-        `${refDesc}\n\n` +
+        `${guide}\n\n` +
         `Generate a new original YouTube thumbnail.\n\n` +
         `Instruction: ${imagePromptText}`;
     }

@@ -45,6 +45,13 @@ export function GeneratePrompt() {
   const shouldReduceMotion = useReducedMotion();
   const [prompt, setPrompt] = useState("");
   const [fileEntries, setFileEntries] = useState<FileEntry[]>([]);
+  const [pendingDeleteFile, setPendingDeleteFile] = useState(false);
+  const [pendingDeleteVideoId, setPendingDeleteVideoId] = useState<
+    string | null
+  >(null);
+  const [fileHoverOpen, setFileHoverOpen] = useState<boolean | undefined>(
+    false,
+  );
   const [authModalOpen, setAuthModalOpen] = useState(false);
   const [creditsModalOpen, setCreditsModalOpen] = useState(false);
 
@@ -77,17 +84,14 @@ export function GeneratePrompt() {
     })),
   );
 
-  const {
-    channelWidgets,
-    videoChips,
-    processValueChange,
-    clearAll,
-    countSlots,
-  } = useYouTubeReferences({
-    onVideoTitleResolved: (originalUrl, title) => {
-      setPrompt((prev) => prev.replace(originalUrl, title));
-    },
-  });
+  const { channelWidgets, videoChips, processValueChange, clearAll } =
+    useYouTubeReferences({
+      onVideoTitleResolved: (originalUrl, title) => {
+        setPrompt((prev) => prev.replace(originalUrl, title));
+      },
+      isAuthenticated: !!session,
+      onAuthRequired: () => setAuthModalOpen(true),
+    });
 
   function addFiles(newFiles: File[]) {
     if (!session) {
@@ -105,17 +109,32 @@ export function GeneratePrompt() {
   }
 
   function removeFile(index: number) {
-    setFileEntries((prev) => {
-      URL.revokeObjectURL(prev[index].url);
-      return prev.filter((_, i) => i !== index);
-    });
+    setFileHoverOpen(false);
+    setTimeout(() => {
+      setFileEntries((prev) => {
+        URL.revokeObjectURL(prev[index].url);
+        return prev.filter((_, i) => i !== index);
+      });
+      setFileHoverOpen(undefined);
+    }, 130);
   }
 
-  function handleValueChange(value: string) {
-    const processed = processValueChange(value, 0);
-    setPrompt(processed);
-    if (pendingPrompt !== null) setPendingPrompt(processed.trim() || null);
-  }
+  const handleValueChange = useCallback(
+    (value: string) => {
+      const processed = processValueChange(value);
+      setPrompt(processed);
+      if (pendingPrompt !== null) setPendingPrompt(processed.trim() || null);
+      if (pendingDeleteFile) setPendingDeleteFile(false);
+      if (pendingDeleteVideoId) setPendingDeleteVideoId(null);
+    },
+    [
+      processValueChange,
+      pendingPrompt,
+      setPendingPrompt,
+      pendingDeleteFile,
+      pendingDeleteVideoId,
+    ],
+  );
 
   const textSegments = useMemo(
     () =>
@@ -278,8 +297,30 @@ export function GeneratePrompt() {
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-      if ((e.key !== "Backspace" && e.key !== "Delete") || !textareaRef.current)
+      if (!textareaRef.current) return;
+      if (e.key !== "Backspace" && e.key !== "Delete") {
+        if (pendingDeleteFile) setPendingDeleteFile(false);
+        if (pendingDeleteVideoId) setPendingDeleteVideoId(null);
         return;
+      }
+
+      if (
+        e.key === "Backspace" &&
+        fileEntries.length > 0 &&
+        textareaRef.current.selectionStart === 0 &&
+        textareaRef.current.selectionEnd === 0 &&
+        !prompt
+      ) {
+        e.preventDefault();
+        if (pendingDeleteFile) {
+          removeFile(0);
+          setPendingDeleteFile(false);
+        } else {
+          setPendingDeleteFile(true);
+        }
+        return;
+      }
+
       if (!textSegments) return;
       const { selectionStart, selectionEnd } = textareaRef.current;
 
@@ -288,7 +329,6 @@ export function GeneratePrompt() {
         const start = offset;
         const end = offset + seg.text.length;
         if (seg.type === "youtube-url") {
-          if (selectionStart === start && selectionEnd === end) break;
           const hitBackspace =
             e.key === "Backspace" &&
             selectionStart === selectionEnd &&
@@ -301,17 +341,37 @@ export function GeneratePrompt() {
             selectionStart === selectionEnd &&
             selectionStart > start &&
             selectionStart < end;
-          if (hitBackspace || hitDelete || hitInside) {
+          const hitSelected = selectionStart === start && selectionEnd === end;
+          if (hitBackspace || hitDelete || hitInside || hitSelected) {
             e.preventDefault();
-            textareaRef.current.selectionStart = start;
-            textareaRef.current.selectionEnd = end;
+            if (pendingDeleteVideoId === seg.videoId) {
+              const newValue = prompt.slice(0, start) + prompt.slice(end);
+              handleValueChange(newValue);
+              requestAnimationFrame(() => {
+                if (textareaRef.current) {
+                  textareaRef.current.selectionStart = start;
+                  textareaRef.current.selectionEnd = start;
+                }
+              });
+              setPendingDeleteVideoId(null);
+            } else {
+              setPendingDeleteVideoId(seg.videoId);
+            }
             return;
           }
         }
         offset = end;
       }
     },
-    [textSegments],
+    [
+      textSegments,
+      fileEntries,
+      prompt,
+      pendingDeleteFile,
+      pendingDeleteVideoId,
+      removeFile,
+      handleValueChange,
+    ],
   );
 
   function handlePaste(e: React.ClipboardEvent) {
@@ -342,7 +402,7 @@ export function GeneratePrompt() {
 
   return (
     <div className="absolute bottom-0 sm:bottom-5 sm:px-5 w-full flex justify-center pointer-events-none">
-      <div className="mx-auto w-full max-w-2xl pointer-events-auto">
+      <div className="mx-auto w-full max-w-xl pointer-events-auto">
         <FileUpload
           onFilesAdded={addFiles}
           accept="image/*"
@@ -356,81 +416,123 @@ export function GeneratePrompt() {
             onPaste={handlePaste}
             isLoading={loading}
             disabled={loading}
+            onClick={() => {
+              if (pendingDeleteFile) setPendingDeleteFile(false);
+              if (pendingDeleteVideoId) setPendingDeleteVideoId(null);
+            }}
           >
-            {fileEntries.length > 0 && (
-              <div className="flex flex-wrap gap-2 px-1 pt-1">
-                <AnimatePresence mode="popLayout">
-                  {fileEntries.map(({ file, url }, index) => (
-                    <motion.div
-                      key={url}
-                      layout
-                      initial={
-                        shouldReduceMotion
-                          ? { opacity: 0 }
-                          : { opacity: 0, scale: 0.85, filter: "blur(4px)" }
-                      }
-                      animate={
-                        shouldReduceMotion
-                          ? { opacity: 1 }
-                          : { opacity: 1, scale: 1, filter: "blur(0px)" }
-                      }
-                      exit={
-                        shouldReduceMotion
-                          ? { opacity: 0 }
-                          : { opacity: 0, scale: 0.85 }
-                      }
-                      transition={{ type: "spring", bounce: 0, duration: 0.25 }}
-                      className="bg-background border rounded-lg text-sm overflow-hidden"
-                      onClick={(e) => e.stopPropagation()}
-                    >
-                      <HoverCard>
-                        <HoverCardTrigger
-                          delay={200}
-                          closeDelay={100}
-                          render={
-                            <div className="flex items-center gap-1.5 pl-1.5 pr-2 py-1.5 cursor-default" />
+            <AnimatePresence initial={false}>
+              {fileEntries.length > 0 && (
+                <motion.div
+                  key="chips"
+                  initial={
+                    shouldReduceMotion
+                      ? { opacity: 0 }
+                      : { height: 0, opacity: 0 }
+                  }
+                  animate={
+                    shouldReduceMotion
+                      ? { opacity: 1 }
+                      : { height: "auto", opacity: 1 }
+                  }
+                  exit={
+                    shouldReduceMotion
+                      ? { opacity: 0 }
+                      : { height: 0, opacity: 0 }
+                  }
+                  transition={{ duration: 0.22, ease: [0.25, 1, 0.5, 1] }}
+                  style={{ overflow: "hidden" }}
+                >
+                  <div className="flex flex-wrap gap-2 px-2 pt-2 pb-1">
+                    <AnimatePresence mode="popLayout">
+                      {fileEntries.map(({ file, url }, index) => (
+                        <motion.div
+                          key={url}
+                          initial={
+                            shouldReduceMotion
+                              ? { opacity: 0 }
+                              : { opacity: 0, scale: 0.85, filter: "blur(4px)" }
                           }
+                          animate={
+                            shouldReduceMotion
+                              ? { opacity: 1 }
+                              : { opacity: 1, scale: 1, filter: "blur(0px)" }
+                          }
+                          exit={
+                            shouldReduceMotion
+                              ? { opacity: 0 }
+                              : { opacity: 0, scale: 0.85 }
+                          }
+                          transition={{
+                            duration: 0.2,
+                            ease: [0.25, 1, 0.5, 1],
+                          }}
+                          className={`bg-background border rounded-lg text-sm overflow-hidden transition-shadow duration-150 ${pendingDeleteFile ? "ring-2 ring-offset-1 ring-offset-card ring-destructive/60" : ""}`}
+                          onClick={(e) => e.stopPropagation()}
                         >
-                          <img
-                            src={url}
-                            alt="Starting image"
-                            className="size-6 rounded-sm object-cover shrink-0"
-                            draggable={false}
-                          />
-                          <span className="text-xs font-medium leading-tight text-muted-foreground">
-                            Starting image
-                          </span>
-                          <button
-                            onClick={(e) => { e.stopPropagation(); removeFile(index); }}
-                            className={buttonVariants({
-                              variant: "ghost",
-                              size: "icon-sm",
-                            })}
+                          <HoverCard
+                            open={fileHoverOpen}
+                            onOpenChange={setFileHoverOpen}
                           >
-                            <X className="size-3" />
-                          </button>
-                        </HoverCardTrigger>
-                        <HoverCardContent
-                          className="w-52 p-2"
-                          side="top"
-                          align="start"
-                        >
-                          <motion.img
-                            src={url}
-                            alt={file.name}
-                            className="aspect-video w-full rounded-sm object-cover"
-                            draggable={false}
-                            initial={shouldReduceMotion ? false : { opacity: 0, scale: 0.95 }}
-                            animate={{ opacity: 1, scale: 1 }}
-                            transition={{ duration: 0.18, ease: [0.25, 1, 0.5, 1] }}
-                          />
-                        </HoverCardContent>
-                      </HoverCard>
-                    </motion.div>
-                  ))}
-                </AnimatePresence>
-              </div>
-            )}
+                            <HoverCardTrigger
+                              delay={200}
+                              closeDelay={100}
+                              render={
+                                <div className="flex items-center gap-1.5 pl-1.5 pr-2 py-1.5 cursor-default" />
+                              }
+                            >
+                              <img
+                                src={url}
+                                alt="Starting image"
+                                className="size-6 rounded-sm object-cover shrink-0"
+                                draggable={false}
+                              />
+                              <span className="text-xs font-medium leading-tight text-muted-foreground">
+                                Starting image
+                              </span>
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  removeFile(index);
+                                }}
+                                className={buttonVariants({
+                                  variant: "ghost",
+                                  size: "icon-sm",
+                                })}
+                              >
+                                <X className="size-3" />
+                              </button>
+                            </HoverCardTrigger>
+                            <HoverCardContent
+                              className="w-52 p-2"
+                              side="top"
+                              align="start"
+                            >
+                              <motion.img
+                                src={url}
+                                alt={file.name}
+                                className="aspect-video w-full rounded-sm object-cover"
+                                draggable={false}
+                                initial={
+                                  shouldReduceMotion
+                                    ? false
+                                    : { opacity: 0, scale: 0.95 }
+                                }
+                                animate={{ opacity: 1, scale: 1 }}
+                                transition={{
+                                  duration: 0.18,
+                                  ease: [0.25, 1, 0.5, 1],
+                                }}
+                              />
+                            </HoverCardContent>
+                          </HoverCard>
+                        </motion.div>
+                      ))}
+                    </AnimatePresence>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
             <div className="relative">
               <PromptTextOverlay
                 textSegments={textSegments}
@@ -439,6 +541,7 @@ export function GeneratePrompt() {
                 overlayRef={overlayRef}
                 shouldReduceMotion={shouldReduceMotion}
                 prompt={prompt}
+                pendingDeleteVideoId={pendingDeleteVideoId}
               />
               <PromptInputTextarea
                 ref={textareaRef}
@@ -455,7 +558,7 @@ export function GeneratePrompt() {
                 }}
               />
             </div>
-            <PromptInputActions className="justify-between px-1 pb-1">
+            <PromptInputActions className="justify-between px-1 pb-1 pt-5">
               {session ? (
                 <FileUploadTrigger
                   className={buttonVariants({
@@ -465,7 +568,9 @@ export function GeneratePrompt() {
                   disabled={loading || selectedVersionId !== null}
                 >
                   <Paperclip className="size-4" />
-                  {fileEntries.length > 0 ? "Edit starting image" : "Add starting image"}
+                  {fileEntries.length > 0
+                    ? "Edit starting image"
+                    : "Add starting image"}
                 </FileUploadTrigger>
               ) : (
                 <button
@@ -480,7 +585,9 @@ export function GeneratePrompt() {
                   }}
                 >
                   <Paperclip className="size-4" />
-                  {fileEntries.length > 0 ? "Edit starting image" : "Add starting image"}
+                  {fileEntries.length > 0
+                    ? "Edit starting image"
+                    : "Add starting image"}
                 </button>
               )}
               <PromptInputAction tooltip="Send">

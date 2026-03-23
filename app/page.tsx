@@ -6,7 +6,7 @@ import { KonamiCode } from "@/components/konami-code";
 
 export default function Home() {
   return (
-    <main className="relative w-full max-w-360 mx-auto h-svh flex flex-col justify-center items-center p-5 pb-24">
+    <main className="relative w-full max-w-5xl mx-auto h-svh flex flex-col justify-center items-center p-5 pb-24">
       <UserMenu />
       <Preview />
       <GeneratePrompt />

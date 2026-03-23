@@ -1,5 +1,5 @@
 "use client";
-import { type JSX, useEffect, useState } from "react";
+import { type JSX, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { motion, MotionProps } from "motion/react";
 
 export type TextScrambleProps = {
@@ -32,28 +32,57 @@ export function TextScramble({
   );
   const [scrambledText, setScrambledText] = useState<string | null>(null);
   const [isAnimating, setIsAnimating] = useState(false);
-  const text = children;
+
+  const prevChildrenRef = useRef(children);
+  if (!trigger && !isAnimating) {
+    prevChildrenRef.current = children;
+  }
+
   const displayText = scrambledText ?? children;
 
-  const scramble = async () => {
+  useLayoutEffect(() => {
+    if (!trigger || isAnimating) return;
+    const fromLen = prevChildrenRef.current.length;
+    if (fromLen <= children.length) return;
+    const initial = Array.from({ length: fromLen }, (_, i) =>
+      i < children.length && children[i] === " "
+        ? " "
+        : characterSet[Math.floor(Math.random() * characterSet.length)],
+    ).join("");
+    setScrambledText(initial);
+  }, [trigger]);
+
+  useEffect(() => {
+    if (!trigger) return;
     if (isAnimating) return;
+
+    const text = children;
+    const fromLen = prevChildrenRef.current.length;
     setIsAnimating(true);
 
     const steps = duration / speed;
     let step = 0;
 
     const interval = setInterval(() => {
-      let scrambled = "";
       const progress = step / steps;
 
-      for (let i = 0; i < text.length; i++) {
-        if (text[i] === " ") {
-          scrambled += " ";
-          continue;
-        }
+      const extraLen =
+        fromLen > text.length
+          ? Math.round((fromLen - text.length) * (1 - progress))
+          : 0;
+      const totalLen = text.length + extraLen;
 
-        if (progress * text.length > i) {
-          scrambled += text[i];
+      let scrambled = "";
+      for (let i = 0; i < totalLen; i++) {
+        if (i < text.length) {
+          if (text[i] === " ") {
+            scrambled += " ";
+          } else if (progress * text.length > i) {
+            scrambled += text[i];
+          } else {
+            scrambled +=
+              characterSet[Math.floor(Math.random() * characterSet.length)];
+          }
         } else {
           scrambled +=
             characterSet[Math.floor(Math.random() * characterSet.length)];
@@ -70,12 +99,8 @@ export function TextScramble({
         onScrambleComplete?.();
       }
     }, speed * 1000);
-  };
 
-  useEffect(() => {
-    if (!trigger) return;
-
-    scramble();
+    return () => clearInterval(interval);
   }, [trigger]);
 
   return (

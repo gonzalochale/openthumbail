@@ -1,6 +1,7 @@
 "use client";
 
 import { motion } from "motion/react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { type ChannelWidget, type VideoChip } from "@/lib/youtube";
 import { type TextSegment } from "@/lib/text-segments";
 import { MentionStatusChip } from "@/components/mention-status-chip";
@@ -12,6 +13,12 @@ import {
 } from "@/components/ui/hover-card";
 import { TextScramble } from "@/components/ui/text-scramble";
 
+function hoverKey(seg: TextSegment): string | null {
+  if (seg.type === "active") return `channel:${seg.handle}`;
+  if (seg.type === "youtube-url") return `video:${seg.videoId}`;
+  return null;
+}
+
 export function PromptTextOverlay({
   textSegments,
   videoChips,
@@ -19,6 +26,7 @@ export function PromptTextOverlay({
   overlayRef,
   shouldReduceMotion,
   prompt,
+  pendingDeleteVideoId,
 }: {
   textSegments: TextSegment[] | null;
   videoChips: VideoChip[];
@@ -26,15 +34,60 @@ export function PromptTextOverlay({
   overlayRef: React.RefObject<HTMLDivElement | null>;
   shouldReduceMotion: boolean | null;
   prompt: string;
+  pendingDeleteVideoId?: string | null;
 }) {
+  const [displayedSegments, setDisplayedSegments] = useState(textSegments);
+
+  const [openKey, setOpenKey] = useState<string | null>(null);
+
+  const openKeyRef = useRef<string | null>(null);
+  const animatingRef = useRef(false);
+  const pendingSegmentsRef = useRef(textSegments);
+  const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (closeTimerRef.current) clearTimeout(closeTimerRef.current);
+    };
+  }, []);
+
+  useLayoutEffect(() => {
+    pendingSegmentsRef.current = textSegments;
+    if (animatingRef.current) return;
+
+    const openK = openKeyRef.current;
+    const stillExists =
+      openK === null ||
+      (textSegments?.some((s) => hoverKey(s) === openK) ?? false);
+    if (stillExists) {
+      setDisplayedSegments(textSegments);
+      return;
+    }
+
+    animatingRef.current = true;
+    openKeyRef.current = null;
+    setOpenKey(null);
+    if (closeTimerRef.current) clearTimeout(closeTimerRef.current);
+    closeTimerRef.current = setTimeout(() => {
+      animatingRef.current = false;
+      setDisplayedSegments(pendingSegmentsRef.current);
+    }, 130);
+  }, [textSegments]);
+
+  function handleSegmentOpenChange(key: string, open: boolean) {
+    const next = open ? key : null;
+    openKeyRef.current = next;
+    setOpenKey(next);
+  }
+
   return (
     <div
       ref={overlayRef}
       aria-hidden
       className="pointer-events-none absolute inset-0 overflow-hidden whitespace-pre-wrap wrap-break-word px-2 py-2 text-base leading-6 text-primary"
     >
-      {textSegments
-        ? textSegments.map((p: TextSegment, i: number) => {
+      {displayedSegments
+        ? displayedSegments.map((p: TextSegment, i: number) => {
             if (p.type === "plain") return <span key={i}>{p.text}</span>;
 
             if (p.type === "youtube-url") {
@@ -52,17 +105,25 @@ export function PromptTextOverlay({
                 );
               }
               const isFound = chip?.stage === "found";
+              const key = `video:${p.videoId}`;
               return (
-                <HoverCard key={i}>
+                <HoverCard
+                  key={i}
+                  open={openKey === key}
+                  onOpenChange={(o) => handleSegmentOpenChange(key, o)}
+                >
                   <HoverCardTrigger
                     delay={200}
                     closeDelay={100}
                     render={
                       <mark
                         className={
-                          isFound
+                          (isFound
                             ? "bg-channel text-channel-foreground rounded-sm not-italic cursor-default pointer-events-auto"
-                            : "bg-muted text-muted-foreground rounded-sm not-italic animate-pulse cursor-default pointer-events-auto"
+                            : "bg-muted text-muted-foreground rounded-sm not-italic animate-pulse cursor-default pointer-events-auto") +
+                          (pendingDeleteVideoId === p.videoId
+                            ? " ring-2 ring-offset-1 ring-offset-card ring-destructive/60"
+                            : "")
                         }
                       />
                     }
@@ -71,7 +132,7 @@ export function PromptTextOverlay({
                       as="span"
                       trigger={isFound && !shouldReduceMotion}
                     >
-                      {p.text}
+                      {isFound && chip ? chip.title : p.text}
                     </TextScramble>
                   </HoverCardTrigger>
                   <HoverCardContent
@@ -116,9 +177,15 @@ export function PromptTextOverlay({
 
             const widget = channelWidgets.get(p.handle);
             const widgetFound = widget?.stage === "found" ? widget : null;
+            const key = `channel:${p.handle}`;
+
             if (widgetFound) {
               return (
-                <HoverCard key={i}>
+                <HoverCard
+                  key={i}
+                  open={openKey === key}
+                  onOpenChange={(o) => handleSegmentOpenChange(key, o)}
+                >
                   <HoverCardTrigger
                     delay={200}
                     closeDelay={100}
@@ -189,7 +256,11 @@ export function PromptTextOverlay({
             }
 
             return (
-              <HoverCard key={i}>
+              <HoverCard
+                key={i}
+                open={openKey === key}
+                onOpenChange={(o) => handleSegmentOpenChange(key, o)}
+              >
                 <HoverCardTrigger
                   delay={200}
                   closeDelay={100}

@@ -17,8 +17,12 @@ import { toast } from "sonner";
 
 export function useYouTubeReferences({
   onVideoTitleResolved,
+  onAuthRequired,
+  isAuthenticated,
 }: {
   onVideoTitleResolved: (originalUrl: string, title: string) => void;
+  onAuthRequired: () => void;
+  isAuthenticated: boolean;
 }) {
   const [channelWidgets, setChannelWidgets] = useState<
     Map<string, ChannelWidget>
@@ -35,61 +39,113 @@ export function useYouTubeReferences({
     onTitleResolvedRef.current = onVideoTitleResolved;
   });
 
+  const seenUnauthRef = useRef<{ videoIds: Set<string>; handles: Set<string> }>(
+    {
+      videoIds: new Set(),
+      handles: new Set(),
+    },
+  );
+
+  const channelWidgetsRef = useRef(new Map<string, ChannelWidget>());
+  const fetchChannelRef = useRef<((handle: string) => Promise<void>) | null>(
+    null,
+  );
+  useEffect(() => {
+    channelWidgetsRef.current = channelWidgets;
+  }, [channelWidgets]);
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    seenUnauthRef.current.videoIds.clear();
+    seenUnauthRef.current.handles.clear();
+    for (const [handle, widget] of channelWidgetsRef.current) {
+      if (
+        widget.stage === "loading" &&
+        !inflightHandlesRef.current.has(handle)
+      ) {
+        fetchChannelRef.current?.(handle);
+      }
+    }
+  }, [isAuthenticated]);
+
   useEffect(() => {
     return () => {
       for (const timer of debounceTimersRef.current.values())
         clearTimeout(timer);
       videoInflightRef.current.clear();
       inflightHandlesRef.current.clear();
+      seenUnauthRef.current.videoIds.clear();
+      seenUnauthRef.current.handles.clear();
     };
   }, []);
 
-  const fetchChannel = useCallback(async (handle: string) => {
-    inflightHandlesRef.current.add(handle);
-    try {
-      const totalUsed =
-        videoChips.filter((c) => c.stage !== "error").length +
-        videoInflightRef.current.size +
-        countChannelThumbnails(channelWidgets);
-      if (totalUsed >= MAX_FILES) {
-        setChannelWidgets((prev) =>
-          new Map(prev).set(handle, { stage: "error", handle }),
-        );
-        toast(`You've reached the ${MAX_FILES} reference image limit`);
-        return;
+  const requireAuth = useCallback(
+    (id: string, seenSet: Set<string>): boolean => {
+      if (!isAuthenticated) {
+        if (!seenSet.has(id)) {
+          seenSet.add(id);
+          onAuthRequired();
+        }
+        return false;
       }
-      const res = await fetch(
-        `/api/youtube/channel?handle=${encodeURIComponent(handle)}`,
-      );
-      if (!inflightHandlesRef.current.has(handle)) return;
-      const data = await res.json();
-      if (!res.ok) {
-        setChannelWidgets((prev) =>
-          new Map(prev).set(handle, { stage: "error", handle }),
+      return true;
+    },
+    [isAuthenticated, onAuthRequired],
+  );
+
+  const fetchChannel = useCallback(
+    async (handle: string) => {
+      if (!requireAuth(handle, seenUnauthRef.current.handles)) return;
+      inflightHandlesRef.current.add(handle);
+      try {
+        const totalUsed =
+          videoChips.filter((c) => c.stage !== "error").length +
+          videoInflightRef.current.size +
+          countChannelThumbnails(channelWidgets);
+        if (totalUsed >= MAX_FILES) {
+          setChannelWidgets((prev) =>
+            new Map(prev).set(handle, { stage: "error", handle }),
+          );
+          toast(`You've reached the ${MAX_FILES} reference image limit`);
+          return;
+        }
+        const res = await fetch(
+          `/api/youtube/channel?handle=${encodeURIComponent(handle)}`,
         );
-        return;
+        if (!inflightHandlesRef.current.has(handle)) return;
+        const data = await res.json();
+        if (!res.ok) {
+          setChannelWidgets((prev) =>
+            new Map(prev).set(handle, { stage: "error", handle }),
+          );
+          return;
+        }
+        const ref = data as ChannelReference;
+        setChannelWidgets((prev) =>
+          new Map(prev).set(
+            handle,
+            ref.thumbnails.length === 0
+              ? { stage: "empty", handle }
+              : { stage: "found", ref },
+          ),
+        );
+      } catch {
+        if (inflightHandlesRef.current.has(handle))
+          setChannelWidgets((prev) =>
+            new Map(prev).set(handle, { stage: "error", handle }),
+          );
+      } finally {
+        inflightHandlesRef.current.delete(handle);
       }
-      const ref = data as ChannelReference;
-      setChannelWidgets((prev) =>
-        new Map(prev).set(
-          handle,
-          ref.thumbnails.length === 0
-            ? { stage: "empty", handle }
-            : { stage: "found", ref },
-        ),
-      );
-    } catch {
-      if (inflightHandlesRef.current.has(handle))
-        setChannelWidgets((prev) =>
-          new Map(prev).set(handle, { stage: "error", handle }),
-        );
-    } finally {
-      inflightHandlesRef.current.delete(handle);
-    }
-  }, [videoChips, channelWidgets]);
+    },
+    [videoChips, channelWidgets, requireAuth],
+  );
+  useEffect(() => {
+    fetchChannelRef.current = fetchChannel;
+  }, [fetchChannel]);
 
   const addVideoChip = useCallback(
-    async (videoId: string, originalUrl: string, fileEntriesCount: number) => {
+    async (videoId: string, originalUrl: string) => {
+      if (!requireAuth(videoId, seenUnauthRef.current.videoIds)) return;
       if (videoInflightRef.current.has(videoId)) return;
       if (videoChips.some((c) => c.videoId === videoId)) return;
       const totalUsed =
@@ -147,11 +203,11 @@ export function useYouTubeReferences({
         videoInflightRef.current.delete(videoId);
       }
     },
-    [videoChips, channelWidgets],
+    [videoChips, channelWidgets, requireAuth],
   );
 
   const processValueChange = useCallback(
-    (value: string, fileEntriesCount: number): string => {
+    (value: string): string => {
       const urlMatches = extractYouTubeMatches(value);
 
       for (const m of urlMatches) {
@@ -182,6 +238,13 @@ export function useYouTubeReferences({
           !videoInflightRef.current.has(m.videoId),
       );
 
+      for (const m of toAdd) {
+        const canonical = `youtu.be/${m.videoId}`;
+        if (m.matchedUrl !== canonical) {
+          value = value.replace(m.matchedUrl, canonical);
+        }
+      }
+
       if (videoChips.some((c) => !idsInTextSet.has(c.videoId))) {
         setVideoChips((prev) =>
           prev.filter((c) => idsInTextSet.has(c.videoId)),
@@ -192,9 +255,7 @@ export function useYouTubeReferences({
         if (!idsInTextSet.has(id)) videoInflightRef.current.delete(id);
       }
 
-      toAdd.forEach((m) =>
-        addVideoChip(m.videoId, m.matchedUrl, fileEntriesCount),
-      );
+      toAdd.forEach((m) => addVideoChip(m.videoId, `youtu.be/${m.videoId}`));
 
       const mentionedHandles = new Set<string>();
       const mentionRe = /@([\w.-]*)/g;
@@ -254,18 +315,10 @@ export function useYouTubeReferences({
     debounceTimersRef.current.clear();
   }, []);
 
-  const countSlots = useCallback(
-    () =>
-      countChannelThumbnails(channelWidgets) +
-      videoChips.filter((c) => c.stage !== "error").length,
-    [channelWidgets, videoChips],
-  );
-
   return {
     channelWidgets,
     videoChips,
     processValueChange,
     clearAll,
-    countSlots,
   };
 }

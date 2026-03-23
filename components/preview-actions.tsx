@@ -2,6 +2,7 @@
 
 import {
   ArrowDown,
+  Check,
   ChevronLeft,
   ChevronRight,
   Copy,
@@ -35,7 +36,11 @@ export function PreviewActions() {
     const steps = [2.5, 3, 3.5, 4, 4.5, 5];
     return steps[Math.floor(Math.random() * steps.length)];
   };
-  const [copying, setCopying] = useState(false);
+  const [copyState, setCopyState] = useState<"idle" | "copying" | "copied">("idle");
+  const copyResetTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [downloadedKey, setDownloadedKey] = useState(0);
+  const [downloaded, setDownloaded] = useState(false);
+  const downloadResetTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const {
     versions,
     selectedVersionId,
@@ -55,12 +60,12 @@ export function PreviewActions() {
   );
 
   async function copyToClipboard() {
-    if (!selectedVersion) return;
+    if (!selectedVersion || copyState === "copying") return;
     if (typeof ClipboardItem === "undefined") {
       toast("Clipboard not supported in this browser");
       return;
     }
-    setCopying(true);
+    setCopyState("copying");
     try {
       const bytes = Uint8Array.from(atob(selectedVersion.imageBase64), (c) =>
         c.charCodeAt(0),
@@ -69,11 +74,12 @@ export function PreviewActions() {
       await navigator.clipboard.write([
         new ClipboardItem({ [selectedVersion.mimeType]: blob }),
       ]);
-      toast("Copied to clipboard");
+      setCopyState("copied");
+      if (copyResetTimer.current) clearTimeout(copyResetTimer.current);
+      copyResetTimer.current = setTimeout(() => setCopyState("idle"), 600);
     } catch {
       toast("Failed to copy to clipboard");
-    } finally {
-      setCopying(false);
+      setCopyState("idle");
     }
   }
 
@@ -195,21 +201,43 @@ export function PreviewActions() {
       <div className="flex items-center gap-1">
         <Tooltip>
           <TooltipTrigger
-            disabled={loading || !selectedVersion || copying}
+            disabled={loading || !selectedVersion || copyState !== "idle"}
             render={
               <Button
                 variant="ghost"
                 onClick={copyToClipboard}
                 size="icon-lg"
-                disabled={loading || !selectedVersion || copying}
+                disabled={loading || !selectedVersion || copyState !== "idle"}
               >
-                <Copy size={16} />
+                <AnimatePresence mode="wait" initial={false}>
+                  {copyState === "copied" ? (
+                    <motion.span
+                      key="check"
+                      initial={shouldReduceMotion ? { opacity: 0 } : { opacity: 0, scale: 0.6 }}
+                      animate={{ opacity: 1, scale: 1 }}
+                      exit={shouldReduceMotion ? { opacity: 0 } : { opacity: 0, scale: 0.6 }}
+                      transition={{ duration: 0.15, ease: [0.25, 1, 0.5, 1] }}
+                    >
+                      <Check size={16} />
+                    </motion.span>
+                  ) : (
+                    <motion.span
+                      key="copy"
+                      initial={shouldReduceMotion ? { opacity: 0 } : { opacity: 0, scale: 0.6 }}
+                      animate={{ opacity: 1, scale: 1 }}
+                      exit={shouldReduceMotion ? { opacity: 0 } : { opacity: 0, scale: 0.6 }}
+                      transition={{ duration: 0.15, ease: [0.25, 1, 0.5, 1] }}
+                    >
+                      <Copy size={16} />
+                    </motion.span>
+                  )}
+                </AnimatePresence>
               </Button>
             }
             onClick={(event) => event.stopPropagation()}
           />
           <TooltipContent>
-            <p>Copy to clipboard</p>
+            <p>{copyState === "copied" ? "Copied!" : "Copy to clipboard"}</p>
           </TooltipContent>
         </Tooltip>
         <Tooltip>
@@ -218,17 +246,46 @@ export function PreviewActions() {
             render={
               <Button
                 variant="ghost"
-                onClick={() => selectedVersion && download(selectedVersion.id)}
+                onClick={() => {
+                  if (!selectedVersion) return;
+                  download(selectedVersion.id);
+                  setDownloaded(true);
+                  setDownloadedKey((k) => k + 1);
+                  if (downloadResetTimer.current) clearTimeout(downloadResetTimer.current);
+                  downloadResetTimer.current = setTimeout(() => setDownloaded(false), 600);
+                }}
                 size="icon-lg"
                 disabled={loading || !selectedVersion}
               >
-                <ArrowDown size={18} />
+                <AnimatePresence mode="wait" initial={false}>
+                  {downloaded ? (
+                    <motion.span
+                      key={`check-${downloadedKey}`}
+                      initial={shouldReduceMotion ? { opacity: 0 } : { opacity: 0, scale: 0.6 }}
+                      animate={{ opacity: 1, scale: 1 }}
+                      exit={shouldReduceMotion ? { opacity: 0 } : { opacity: 0, scale: 0.6 }}
+                      transition={{ duration: 0.15, ease: [0.25, 1, 0.5, 1] }}
+                    >
+                      <Check size={16} />
+                    </motion.span>
+                  ) : (
+                    <motion.span
+                      key="arrow"
+                      initial={shouldReduceMotion ? { opacity: 0 } : { opacity: 0, scale: 0.6 }}
+                      animate={{ opacity: 1, scale: 1 }}
+                      exit={shouldReduceMotion ? { opacity: 0 } : { opacity: 0, scale: 0.6 }}
+                      transition={{ duration: 0.15, ease: [0.25, 1, 0.5, 1] }}
+                    >
+                      <ArrowDown size={18} />
+                    </motion.span>
+                  )}
+                </AnimatePresence>
               </Button>
             }
             onClick={(event) => event.stopPropagation()}
           />
           <TooltipContent>
-            <p>Download</p>
+            <p>{downloaded ? "Downloaded!" : "Download"}</p>
           </TooltipContent>
         </Tooltip>
       </div>

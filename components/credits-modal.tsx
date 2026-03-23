@@ -20,7 +20,6 @@ interface CreditsModalProps {
 }
 
 const PLANS = [
-  { credits: 10 },
   { credits: 25 },
   { credits: 50, popular: true },
   { credits: 100 },

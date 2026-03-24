@@ -2,7 +2,11 @@
 
 import { motion } from "motion/react";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { type ChannelWidget, type VideoChip } from "@/lib/youtube";
+import {
+  type ChannelWidget,
+  type VideoChip,
+  ytThumbnailUrl,
+} from "@/lib/youtube";
 import { type TextSegment } from "@/lib/text-segments";
 import { MentionStatusChip } from "@/components/mention-status-chip";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -104,7 +108,9 @@ export function PromptTextOverlay({
                   </MentionStatusChip>
                 );
               }
-              const isFound = chip?.stage === "found";
+              const isFound = chip?.stage === "found" || chip === undefined;
+              const chipVideoId = chip?.videoId ?? p.videoId;
+              const chipTitle = chip?.stage === "found" ? chip.title : p.text;
               const key = `video:${p.videoId}`;
               return (
                 <HoverCard
@@ -132,7 +138,7 @@ export function PromptTextOverlay({
                       as="span"
                       trigger={isFound && !shouldReduceMotion}
                     >
-                      {isFound && chip ? chip.title : p.text}
+                      {isFound ? chipTitle : p.text}
                     </TextScramble>
                   </HoverCardTrigger>
                   <HoverCardContent
@@ -142,8 +148,8 @@ export function PromptTextOverlay({
                   >
                     {isFound ? (
                       <motion.img
-                        src={`https://i.ytimg.com/vi/${chip.videoId}/hqdefault.jpg`}
-                        alt={chip.title}
+                        src={ytThumbnailUrl(chipVideoId)}
+                        alt={chipTitle}
                         className="aspect-video w-full rounded-sm object-cover"
                         draggable={false}
                         initial={

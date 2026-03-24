@@ -18,11 +18,10 @@ interface CreditsModalProps {
 }
 
 const PLANS = [
-  { credits: 30 },
+  { credits: 20 },
   { credits: 100, popular: true },
   { credits: 500 },
 ] as const;
-
 
 export function CreditsModal({ open, onOpenChange }: CreditsModalProps) {
   const router = useRouter();

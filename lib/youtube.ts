@@ -1,3 +1,9 @@
+export type VideoData = {
+  videoId: string;
+  title: string;
+  thumbnailUrl: string;
+};
+
 export type ChannelThumbnail = {
   videoId: string;
   url: string;
@@ -19,6 +25,16 @@ export type ChannelWidget =
   | { stage: "found"; ref: ChannelReference }
   | { stage: "empty"; handle: string }
   | { stage: "error"; handle: string };
+
+export function ytThumbnailUrl(videoId: string): string {
+  return `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`;
+}
+
+export function truncateTitle(title: string, maxLength: number): string {
+  return title.length > maxLength
+    ? title.slice(0, maxLength - 1) + "…"
+    : title;
+}
 
 export const YOUTUBE_URL_RE =
   /(?:https?:\/\/)?(?:www\.)?(?:youtube\.com\/(?:watch\?(?:\S*?&)?v=|shorts\/)|youtu\.be\/)([A-Za-z0-9_-]{11})[^\s]*/;

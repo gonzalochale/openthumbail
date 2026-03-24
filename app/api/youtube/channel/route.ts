@@ -1,17 +1,23 @@
 import { auth } from "@/lib/auth";
 import { headers } from "next/headers";
+import { ytThumbnailUrl } from "@/lib/youtube";
 
 interface YTChannelResponse {
   items?: Array<{
     id: string;
     snippet: { title: string };
+    contentDetails: {
+      relatedPlaylists: { uploads: string };
+    };
   }>;
 }
 
-interface YTSearchResponse {
+interface YTPlaylistItemsResponse {
   items?: Array<{
-    id: { videoId: string };
-    snippet: { title: string };
+    snippet: {
+      resourceId: { videoId: string };
+      title: string;
+    };
   }>;
 }
 
@@ -52,7 +58,7 @@ export async function GET(request: Request) {
     );
   }
 
-  const base = `https://www.googleapis.com/youtube/v3/channels?part=snippet&key=${apiKey}`;
+  const base = `https://www.googleapis.com/youtube/v3/channels?part=snippet,contentDetails&key=${apiKey}`;
   const [handleRes, usernameRes] = await Promise.all([
     fetch(`${base}&forHandle=@${encodeURIComponent(handle)}`),
     fetch(`${base}&forUsername=${encodeURIComponent(handle)}`),
@@ -76,19 +82,37 @@ export async function GET(request: Request) {
     return Response.json({ error: "Channel not found" }, { status: 404 });
   }
 
-  const channelId = channel.id;
+  const uploadsPlaylistId =
+    channel.contentDetails?.relatedPlaylists?.uploads;
+  if (!uploadsPlaylistId) {
+    return Response.json({ handle, thumbnails: [] });
+  }
 
-  const searchRes = await fetch(
-    `https://www.googleapis.com/youtube/v3/search?channelId=${channelId}&type=video&order=date&maxResults=20&videoDuration=medium&part=snippet&key=${apiKey}`,
+  const playlistRes = await fetch(
+    `https://www.googleapis.com/youtube/v3/playlistItems?playlistId=${encodeURIComponent(uploadsPlaylistId)}&maxResults=20&part=snippet&key=${apiKey}`,
   );
-  const searchData = (await searchRes.json()) as YTSearchResponse;
+  const playlistData = (await playlistRes.json()) as YTPlaylistItemsResponse & {
+    error?: unknown;
+  };
 
-  const candidates = (searchData.items ?? []).filter((item) => item.id.videoId);
+  if (playlistData.error) {
+    console.error(
+      "[youtube/channel] playlistItems API error:",
+      JSON.stringify(playlistData.error),
+    );
+    return Response.json({ error: "YouTube API error" }, { status: 502 });
+  }
+
+  const candidates = (playlistData.items ?? []).filter(
+    (item) => item.snippet.resourceId.videoId,
+  );
   if (candidates.length === 0) {
     return Response.json({ handle, thumbnails: [] });
   }
 
-  const ids = candidates.map((item) => item.id.videoId).join(",");
+  const ids = candidates
+    .map((item) => item.snippet.resourceId.videoId)
+    .join(",");
   const videosRes = await fetch(
     `https://www.googleapis.com/youtube/v3/videos?id=${ids}&part=contentDetails&key=${apiKey}`,
   );
@@ -102,12 +126,16 @@ export async function GET(request: Request) {
   );
 
   const thumbnails = candidates
-    .filter((item) => (durationsById.get(item.id.videoId) ?? 0) > 180)
+    .map((item) => ({
+      videoId: item.snippet.resourceId.videoId,
+      title: item.snippet.title,
+    }))
+    .filter((item) => (durationsById.get(item.videoId) ?? 0) > 180)
     .slice(0, 3)
     .map((item) => ({
-      videoId: item.id.videoId,
-      url: `https://i.ytimg.com/vi/${item.id.videoId}/hqdefault.jpg`,
-      title: item.snippet.title,
+      videoId: item.videoId,
+      url: ytThumbnailUrl(item.videoId),
+      title: item.title,
     }));
 
   return Response.json({ handle, thumbnails });

@@ -1,5 +1,6 @@
 import { auth } from "@/lib/auth";
 import { headers } from "next/headers";
+import { ytThumbnailUrl } from "@/lib/youtube";
 
 interface YTVideoResponse {
   items?: Array<{
@@ -54,7 +55,7 @@ export async function GET(request: Request) {
   const thumbnailUrl =
     video.snippet.thumbnails.high?.url ??
     video.snippet.thumbnails.medium?.url ??
-    `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`;
+    ytThumbnailUrl(videoId);
 
   return Response.json({
     videoId,

@@ -32,6 +32,7 @@ import {
   type ChannelReference,
   stripVideoChips,
   youtubeRe,
+  ytThumbnailUrl,
 } from "@/lib/youtube";
 import { getTextSegments } from "@/lib/text-segments";
 import { useThumbnailShortcuts } from "@/hooks/use-thumbnail-shortcuts";
@@ -166,7 +167,7 @@ export function GeneratePrompt() {
       const videoRefs = videoChipsSnapshot
         .filter((c): c is typeof c & { stage: "found" } => c.stage === "found")
         .map((c) => ({
-          url: `https://i.ytimg.com/vi/${c.videoId}/hqdefault.jpg`,
+          url: ytThumbnailUrl(c.videoId),
         }));
 
       const entriesToSubmit = fileEntries;
@@ -301,7 +302,7 @@ export function GeneratePrompt() {
       if (e.key !== "Backspace" && e.key !== "Delete") {
         if (pendingDeleteFile) setPendingDeleteFile(false);
         if (pendingDeleteVideoId) setPendingDeleteVideoId(null);
-        return;
+        if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
       }
 
       if (
@@ -329,6 +330,25 @@ export function GeneratePrompt() {
         const start = offset;
         const end = offset + seg.text.length;
         if (seg.type === "youtube-url") {
+          if (
+            !e.shiftKey && !e.metaKey && !e.ctrlKey && !e.altKey &&
+            selectionStart === selectionEnd
+          ) {
+            const jumpTo =
+              e.key === "ArrowLeft" && selectionStart === end ? start :
+              e.key === "ArrowRight" && selectionStart === start ? end :
+              null;
+            if (jumpTo !== null) {
+              e.preventDefault();
+              requestAnimationFrame(() => {
+                if (textareaRef.current) {
+                  textareaRef.current.selectionStart = jumpTo;
+                  textareaRef.current.selectionEnd = jumpTo;
+                }
+              });
+              return;
+            }
+          }
           const hitBackspace =
             e.key === "Backspace" &&
             selectionStart === selectionEnd &&

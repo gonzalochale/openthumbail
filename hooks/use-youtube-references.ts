@@ -7,6 +7,7 @@ import {
   type VideoChip,
   countChannelThumbnails,
   extractYouTubeMatches,
+  truncateTitle,
 } from "@/lib/youtube";
 import {
   DEBOUNCE_MS,
@@ -14,6 +15,7 @@ import {
   VIDEO_TITLE_MAX_LENGTH,
 } from "@/lib/constants";
 import { toast } from "sonner";
+import { useYouTubeCacheStore } from "@/store/use-youtube-cache-store";
 
 export function useYouTubeReferences({
   onVideoTitleResolved,
@@ -28,6 +30,11 @@ export function useYouTubeReferences({
     Map<string, ChannelWidget>
   >(new Map());
   const [videoChips, setVideoChips] = useState<VideoChip[]>([]);
+
+  const getChannel = useYouTubeCacheStore((s) => s.getChannel);
+  const setChannel = useYouTubeCacheStore((s) => s.setChannel);
+  const getVideo = useYouTubeCacheStore((s) => s.getVideo);
+  const setVideo = useYouTubeCacheStore((s) => s.setVideo);
 
   const debounceTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(
     new Map(),
@@ -95,19 +102,31 @@ export function useYouTubeReferences({
   const fetchChannel = useCallback(
     async (handle: string) => {
       if (!requireAuth(handle, seenUnauthRef.current.handles)) return;
+      const totalUsed =
+        videoChips.filter((c) => c.stage !== "error").length +
+        videoInflightRef.current.size +
+        countChannelThumbnails(channelWidgets);
+      if (totalUsed >= MAX_FILES) {
+        setChannelWidgets((prev) =>
+          new Map(prev).set(handle, { stage: "error", handle }),
+        );
+        toast(`You've reached the ${MAX_FILES} reference image limit`);
+        return;
+      }
+      const cached = getChannel(handle);
+      if (cached) {
+        setChannelWidgets((prev) =>
+          new Map(prev).set(
+            handle,
+            cached.thumbnails.length === 0
+              ? { stage: "empty", handle }
+              : { stage: "found", ref: cached },
+          ),
+        );
+        return;
+      }
       inflightHandlesRef.current.add(handle);
       try {
-        const totalUsed =
-          videoChips.filter((c) => c.stage !== "error").length +
-          videoInflightRef.current.size +
-          countChannelThumbnails(channelWidgets);
-        if (totalUsed >= MAX_FILES) {
-          setChannelWidgets((prev) =>
-            new Map(prev).set(handle, { stage: "error", handle }),
-          );
-          toast(`You've reached the ${MAX_FILES} reference image limit`);
-          return;
-        }
         const res = await fetch(
           `/api/youtube/channel?handle=${encodeURIComponent(handle)}`,
         );
@@ -120,6 +139,7 @@ export function useYouTubeReferences({
           return;
         }
         const ref = data as ChannelReference;
+        setChannel(handle, ref);
         setChannelWidgets((prev) =>
           new Map(prev).set(
             handle,
@@ -137,7 +157,7 @@ export function useYouTubeReferences({
         inflightHandlesRef.current.delete(handle);
       }
     },
-    [videoChips, channelWidgets, requireAuth],
+    [videoChips, channelWidgets, requireAuth, getChannel, setChannel],
   );
   useEffect(() => {
     fetchChannelRef.current = fetchChannel;
@@ -154,6 +174,15 @@ export function useYouTubeReferences({
         countChannelThumbnails(channelWidgets);
       if (totalUsed >= MAX_FILES) {
         toast(`You've reached the ${MAX_FILES} reference image limit`);
+        return;
+      }
+      const cachedVideo = getVideo(videoId);
+      if (cachedVideo) {
+        const title = truncateTitle(cachedVideo.title, VIDEO_TITLE_MAX_LENGTH);
+        setVideoChips((prev) => [
+          ...prev,
+          { stage: "found", videoId, title, originalUrl },
+        ]);
         return;
       }
       videoInflightRef.current.add(videoId);
@@ -178,10 +207,12 @@ export function useYouTubeReferences({
           return;
         }
         const rawTitle = data.title as string;
-        const title =
-          rawTitle.length > VIDEO_TITLE_MAX_LENGTH
-            ? rawTitle.slice(0, VIDEO_TITLE_MAX_LENGTH - 1) + "…"
-            : rawTitle;
+        const title = truncateTitle(rawTitle, VIDEO_TITLE_MAX_LENGTH);
+        setVideo(videoId, {
+          videoId,
+          title: rawTitle,
+          thumbnailUrl: data.thumbnailUrl as string,
+        });
         setVideoChips((prev) =>
           prev.map((c) =>
             c.videoId === videoId
@@ -203,7 +234,7 @@ export function useYouTubeReferences({
         videoInflightRef.current.delete(videoId);
       }
     },
-    [videoChips, channelWidgets, requireAuth],
+    [videoChips, channelWidgets, requireAuth, getVideo, setVideo],
   );
 
   const processValueChange = useCallback(
@@ -242,6 +273,13 @@ export function useYouTubeReferences({
         const canonical = `youtu.be/${m.videoId}`;
         if (m.matchedUrl !== canonical) {
           value = value.replace(m.matchedUrl, canonical);
+        }
+        const cached = getVideo(m.videoId);
+        if (cached) {
+          value = value.replace(
+            canonical,
+            truncateTitle(cached.title, VIDEO_TITLE_MAX_LENGTH),
+          );
         }
       }
 
@@ -303,7 +341,7 @@ export function useYouTubeReferences({
 
       return value;
     },
-    [videoChips, channelWidgets, addVideoChip, fetchChannel],
+    [videoChips, channelWidgets, addVideoChip, fetchChannel, getVideo],
   );
 
   const clearAll = useCallback(() => {

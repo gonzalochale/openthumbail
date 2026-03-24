@@ -2,7 +2,7 @@ import { auth } from "@/lib/auth";
 import { pool } from "@/lib/db";
 import { headers } from "next/headers";
 import Stripe from "stripe";
-import { CREDIT_UNIT_AMOUNT_CENTS } from "@/lib/constants";
+import { CREDIT_PLANS, CREDIT_UNIT_AMOUNT_CENTS } from "@/lib/constants";
 
 export async function POST(req: Request) {
   const session = await auth.api.getSession({ headers: await headers() });
@@ -38,7 +38,7 @@ export async function POST(req: Request) {
       {
         price_data: {
           currency: "usd",
-          unit_amount: CREDIT_UNIT_AMOUNT_CENTS,
+          unit_amount: CREDIT_PLANS[credits] ?? CREDIT_UNIT_AMOUNT_CENTS,
           product_data: { name: "OpenThumbnail Credits" },
         },
         quantity: credits,

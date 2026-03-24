@@ -4,15 +4,13 @@ import { useState } from "react";
 import {
   Dialog,
   DialogContent,
-  DialogDescription,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { useRouter } from "next/navigation";
-import { CREDIT_UNIT_AMOUNT_CENTS } from "@/lib/constants";
-import { Sparkle } from "lucide-react";
+import { CREDIT_PLANS } from "@/lib/constants";
+import { Zap } from "lucide-react";
 
 interface CreditsModalProps {
   open: boolean;
@@ -20,10 +18,11 @@ interface CreditsModalProps {
 }
 
 const PLANS = [
-  { credits: 25 },
-  { credits: 50, popular: true },
-  { credits: 100 },
+  { credits: 30 },
+  { credits: 100, popular: true },
+  { credits: 500 },
 ] as const;
+
 
 export function CreditsModal({ open, onOpenChange }: CreditsModalProps) {
   const router = useRouter();
@@ -47,51 +46,56 @@ export function CreditsModal({ open, onOpenChange }: CreditsModalProps) {
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent showCloseButton={false} className="max-w-90">
+      <DialogContent showCloseButton={false} className="max-w-sm">
         <DialogHeader>
-          <DialogTitle>Add credits</DialogTitle>
-          <DialogDescription>
-            Each generation costs 1 credit, the pricing will increase in the
-            future as we add more features so grab a pack now!
-          </DialogDescription>
+          <DialogTitle className="text-base">Get credits</DialogTitle>
+          <p className="text-sm text-muted-foreground">
+            1 credit = 1 thumbnail, bigger packs save more and prices will
+            increase as we ship new features so grab a pack while the prices are
+            low!
+          </p>
         </DialogHeader>
-        <div className="flex flex-col gap-2">
+        <div className="flex flex-col gap-3">
           {PLANS.map((plan) => {
             const isLoading = loadingAmount === plan.credits;
+            const isDisabled = loadingAmount !== null && !isLoading;
+            const pricePerCredit = CREDIT_PLANS[plan.credits];
+            const totalCents = plan.credits * pricePerCredit;
+            const isPopular = "popular" in plan && plan.popular;
+
             return (
               <button
                 key={plan.credits}
                 onClick={() => handleBuy(plan.credits)}
-                disabled={loadingAmount !== null && !isLoading}
+                disabled={isDisabled}
                 className={cn(
-                  "hover:cursor-pointer group flex items-center justify-between w-full px-4 py-3.5 rounded-lg border transition-all text-left outline-none",
+                  "cursor-pointer group relative flex items-center justify-between w-full px-4 py-3.5 rounded-xl border transition-all text-left outline-none",
                   "focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1",
-                  "disabled:pointer-events-none",
-                  "popular" in plan
-                    ? "border-foreground/12 bg-foreground/4 dark:bg-foreground/7"
-                    : "border-border hover:bg-muted/50 hover:border-foreground/10",
-                  isLoading && "opacity-50",
+                  "disabled:pointer-events-none disabled:opacity-40",
+                  loadingAmount === null && "hover:border-foreground/40",
+                  isPopular
+                    ? "border-foreground/20 bg-foreground/5 dark:bg-foreground/7"
+                    : "border-border",
+                  isLoading && "opacity-60",
                 )}
               >
+                {isPopular && (
+                  <span className="absolute -top-1 right-3.5 flex items-center gap-1 rounded-full bg-foreground px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-background">
+                    <Zap className="h-2.5 w-2.5" />
+                    Most popular
+                  </span>
+                )}
                 <div className="flex flex-col gap-0.5">
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm font-medium">
-                      {plan.credits} credits
-                    </span>
-                    {"popular" in plan && plan.popular && (
-                      <Badge>
-                        <Sparkle className="w-3 h-3" />
-                        Popular
-                      </Badge>
-                    )}
-                  </div>
+                  <span className="text-sm font-semibold">
+                    {plan.credits} credits
+                  </span>
+                  <span className="text-xs text-muted-foreground">
+                    ${(pricePerCredit / 100).toFixed(2)} per credit
+                  </span>
                 </div>
-                <div className="flex items-center gap-2.5">
-                  <span className="text-sm font-semibold tabular-nums">
-                    $
-                    {((plan.credits * CREDIT_UNIT_AMOUNT_CENTS) / 100).toFixed(
-                      2,
-                    )}
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-bold tabular-nums">
+                    ${(totalCents / 100).toFixed(2)}
                   </span>
                 </div>
               </button>
@@ -99,7 +103,7 @@ export function CreditsModal({ open, onOpenChange }: CreditsModalProps) {
           })}
         </div>
         <p className="text-[11px] text-muted-foreground text-center">
-          Credits never expire, secure checkout via Stripe
+          Credits never expire
         </p>
       </DialogContent>
     </Dialog>

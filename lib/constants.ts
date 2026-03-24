@@ -38,6 +38,11 @@ export const GENERATING_PHRASES = [
   "Making your content stand out...",
 ];
 export const CREDIT_UNIT_AMOUNT_CENTS = 20;
+export const CREDIT_PLANS: Record<number, number> = {
+  30: 30,
+  100: 25,
+  500: 20,
+};
 export const MAX_FILES = 10;
 export const MAX_PROMPT_LENGTH = 1000;
 export const DEBOUNCE_MS = 600;

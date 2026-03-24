@@ -41,6 +41,7 @@
   --color-card: var(--card);
   --color-channel: var(--channel);
   --color-channel-foreground: var(--channel-foreground);
+  --color-success: var(--success);
 
   --radius-sm: calc(var(--radius) * 0.6);
   --radius-md: calc(var(--radius) * 0.8);
@@ -77,6 +78,7 @@
   --chart-5: oklch(0.269 0 0);
   --channel: oklch(27.45% 0.066 253.93);
   --channel-foreground: oklch(54.06% 0.14 253.17);
+  --success: oklch(0.527 0.154 150.069);
 
   --radius: 1rem;
   --sidebar: oklch(0.985 0 0);
@@ -115,6 +117,7 @@
   --chart-5: oklch(0.269 0 0);
   --channel: oklch(27.45% 0.066 253.93);
   --channel-foreground: oklch(54.06% 0.14 253.17);
+  --success: oklch(0.627 0.154 150.069);
 
   --sidebar: oklch(0.1586 0.0021 106.63);
   --sidebar-foreground: oklch(0.985 0 0);

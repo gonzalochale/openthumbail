@@ -15,7 +15,7 @@ export const auth = betterAuth({
       credits: {
         type: "number",
         required: false,
-        defaultValue: 0,
+        defaultValue: 1,
         input: false,
       },
       stripeCustomerId: {

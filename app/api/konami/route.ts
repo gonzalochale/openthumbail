@@ -9,6 +9,7 @@ export async function POST() {
 
   const { newBalance, alreadyRedeemed } = await grantKonamiCredits(
     session.user.id,
+    session.user.email,
   );
   if (alreadyRedeemed)
     return Response.json({ error: "Already redeemed" }, { status: 409 });

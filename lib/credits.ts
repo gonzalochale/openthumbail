@@ -34,13 +34,14 @@ export async function refundCredit(userId: string): Promise<void> {
 
 export async function grantKonamiCredits(
   userId: string,
+  email: string,
 ): Promise<{ newBalance: number; alreadyRedeemed: boolean }> {
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
     const insert = await client.query(
-      `INSERT INTO konami_redemption (user_id) VALUES ($1) ON CONFLICT (user_id) DO NOTHING`,
-      [userId],
+      `INSERT INTO konami_redemption (email) VALUES ($1) ON CONFLICT (email) DO NOTHING`,
+      [email],
     );
     if ((insert.rowCount ?? 0) === 0) {
       await client.query("ROLLBACK");

@@ -49,7 +49,7 @@ export function CreditsModal({ open, onOpenChange }: CreditsModalProps) {
         <DialogHeader>
           <DialogTitle className="text-base">Get credits</DialogTitle>
           <p className="text-sm text-muted-foreground">
-            1 credit = 1 thumbnail, bigger packs save more and prices will
+            1 credit = 1 generation, bigger packs save more and prices will
             increase as we ship new features so grab a pack while the prices are
             low!
           </p>

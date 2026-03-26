@@ -20,6 +20,10 @@ import {
   type PreviousVersion,
   type VideoRef,
 } from "@/lib/build-image-prompt";
+import {
+  fetchPreviousVersion,
+  persistGeneration,
+} from "@/lib/generation-service";
 
 const safetySchema = z.object({
   blocked: z.boolean(),
@@ -34,11 +38,20 @@ export async function POST(req: Request) {
   }
 
   const body = await req.json();
-  const { prompt, previousVersion, channelRefs, videoRefs } = body as {
+  const {
+    prompt,
+    uploadedImage,
+    channelRefs,
+    videoRefs,
+    sessionId,
+    previousGenerationId,
+  } = body as {
     prompt: string;
-    previousVersion?: PreviousVersion;
+    uploadedImage?: { imageBase64: string; mimeType: string };
     channelRefs?: ChannelRef[];
     videoRefs?: VideoRef[];
+    sessionId?: string;
+    previousGenerationId?: string;
   };
 
   if (!prompt?.trim()) {
@@ -85,13 +98,29 @@ export async function POST(req: Request) {
   }
 
   try {
+    const previousVersion: PreviousVersion | undefined = previousGenerationId
+      ? await fetchPreviousVersion(previousGenerationId, session.user.id)
+      : uploadedImage
+        ? { ...uploadedImage, enhancedPrompt: null }
+        : undefined;
+
     if (!CREATE_IMAGES) {
       await new Promise((r) => setTimeout(r, 5000));
-      return Response.json({
-        image: whitePng(2560, 1440),
-        mimeType: "image/png",
-        enhancedPrompt: prompt,
-      });
+      const generationId = crypto.randomUUID();
+      if (sessionId) {
+        await persistGeneration({
+          generationId,
+          sessionId,
+          userId: session.user.id,
+          prompt,
+          enhancedPrompt: prompt,
+          base64: whitePng(2560, 1440),
+          previousGenerationId,
+          channelRefs,
+          videoRefs,
+        });
+      }
+      return Response.json({ mimeType: "image/png", enhancedPrompt: prompt, generationId });
     }
 
     const google = createGoogleGenerativeAI({ apiKey });
@@ -107,10 +136,7 @@ export async function POST(req: Request) {
       await refundCredit(session.user.id);
       console.warn("Content blocked by safety filter:", output.reason);
       return Response.json(
-        {
-          error:
-            output.reason ?? "Generated content violates safety guidelines",
-        },
+        { error: output.reason ?? "Generated content violates safety guidelines" },
         { status: 422 },
       );
     }
@@ -118,10 +144,7 @@ export async function POST(req: Request) {
     const safePrompt = output.prompt;
     if (!safePrompt) {
       await refundCredit(session.user.id);
-      return Response.json(
-        { error: "Failed to validate prompt" },
-        { status: 500 },
-      );
+      return Response.json({ error: "Failed to validate prompt" }, { status: 500 });
     }
 
     const { text, images } = buildImagePrompt({
@@ -133,27 +156,31 @@ export async function POST(req: Request) {
       previousVersion,
     });
 
-    const imagePrompt = images.length > 0 ? { text, images } : text;
-
     const { image } = await generateImage({
       model: google.image(IMAGE_MODEL),
-      prompt: imagePrompt,
+      prompt: images.length > 0 ? { text, images } : text,
       aspectRatio: "16:9",
       providerOptions: {
-        google: {
-          imageConfig: {
-            aspectRatio: "16:9",
-            imageSize: "2K",
-          },
-        },
+        google: { imageConfig: { aspectRatio: "16:9", imageSize: "2K" } },
       },
     });
 
-    return Response.json({
-      image: image.base64,
-      mimeType: "image/png",
-      enhancedPrompt: safePrompt,
-    });
+    const generationId = crypto.randomUUID();
+    if (sessionId) {
+      await persistGeneration({
+        generationId,
+        sessionId,
+        userId: session.user.id,
+        prompt,
+        enhancedPrompt: safePrompt,
+        base64: image.base64,
+        previousGenerationId,
+        channelRefs,
+        videoRefs,
+      });
+    }
+
+    return Response.json({ mimeType: "image/png", enhancedPrompt: safePrompt, generationId });
   } catch (err) {
     await refundCredit(session.user.id);
     const message =

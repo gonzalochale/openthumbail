@@ -6,6 +6,8 @@ export type TextSegment =
   | { type: "duplicate-channel"; text: string }
   | { type: "youtube-url"; text: string; videoId: string };
 
+const MENTION_RE = /@([\w.-]*)/g;
+
 export function getTextSegments(
   text: string,
   channelWidgets: Map<string, ChannelWidget>,
@@ -14,7 +16,7 @@ export function getTextSegments(
   type RawMatch = { start: number; end: number; segment: TextSegment };
   const matches: RawMatch[] = [];
 
-  const mentionRe = /@([\w.-]*)/g;
+  const mentionRe = new RegExp(MENTION_RE.source, "g");
   const seenHandles = new Set<string>();
   let m: RegExpExecArray | null;
   while ((m = mentionRe.exec(text)) !== null) {

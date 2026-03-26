@@ -45,8 +45,10 @@ export function PreviewActions() {
     loading,
     download,
     downloadTick,
+    downloading,
     copy,
     copyTick,
+    copying,
     selectVersion,
   } = useThumbnailStore(
     useShallow((s) => ({
@@ -56,14 +58,19 @@ export function PreviewActions() {
       loading: s.loading,
       download: s.download,
       downloadTick: s.downloadTick,
+      downloading: s.downloading,
       copy: s.copy,
       copyTick: s.copyTick,
+      copying: s.copying,
       selectVersion: s.selectVersion,
     })),
   );
 
   const shuffledPhrases = useMemo(
-    () => (!generating ? GENERATING_PHRASES : [...GENERATING_PHRASES].sort(() => Math.random() - 0.5)),
+    () =>
+      !generating
+        ? GENERATING_PHRASES
+        : [...GENERATING_PHRASES].sort(() => Math.random() - 0.5),
     [generating],
   );
   useEffect(() => {
@@ -71,12 +78,26 @@ export function PreviewActions() {
   }, [generating]);
 
   useEffect(() => {
+    const version = useThumbnailStore
+      .getState()
+      .versions.find((v) => v.id === selectedVersionId);
+    if (!version) return;
+    const controller = new AbortController();
+    fetch(`${version.imageUrl}?blob=1`, { signal: controller.signal }).catch(
+      () => {},
+    );
+    return () => controller.abort();
+  }, [selectedVersionId]);
+
+  useEffect(() => {
     if (downloadTick === 0) return;
     setDownloaded(true);
     setDownloadedKey((k) => k + 1);
     if (downloadResetTimer.current) clearTimeout(downloadResetTimer.current);
     downloadResetTimer.current = setTimeout(() => setDownloaded(false), 600);
-    return () => { if (downloadResetTimer.current) clearTimeout(downloadResetTimer.current); };
+    return () => {
+      if (downloadResetTimer.current) clearTimeout(downloadResetTimer.current);
+    };
   }, [downloadTick]);
 
   useEffect(() => {
@@ -84,11 +105,18 @@ export function PreviewActions() {
     setCopyState("copied");
     if (copyResetTimer.current) clearTimeout(copyResetTimer.current);
     copyResetTimer.current = setTimeout(() => setCopyState("idle"), 600);
-    return () => { if (copyResetTimer.current) clearTimeout(copyResetTimer.current); };
+    return () => {
+      if (copyResetTimer.current) clearTimeout(copyResetTimer.current);
+    };
   }, [copyTick]);
 
   const selectedVersion = versions.find((v) => v.id === selectedVersionId);
   if (!selectedVersion && !generating) return null;
+
+  const copyDisabled =
+    loading || !selectedVersion || copying || copyState !== "idle";
+  const downloadDisabled =
+    loading || !selectedVersion || downloading || downloaded;
 
   return (
     <div className="w-full flex items-center justify-between gap-2">
@@ -178,7 +206,7 @@ export function PreviewActions() {
                           >
                             <span className="font-mono text-xs">v{v.id}</span>
                             <img
-                              src={`data:${v.mimeType};base64,${v.imageBase64}`}
+                              src={v.imageUrl}
                               alt={`v${v.id}`}
                               className="aspect-video w-16 shrink-0 rounded-sm object-cover select-none bg-accent"
                               draggable={false}
@@ -205,21 +233,29 @@ export function PreviewActions() {
       <div className="flex items-center gap-1">
         <Tooltip>
           <TooltipTrigger
-            disabled={loading || !selectedVersion || copyState !== "idle"}
+            disabled={copyDisabled}
             render={
               <Button
                 variant="ghost"
                 onClick={() => copy(selectedVersion!.id)}
                 size="icon-lg"
-                disabled={loading || !selectedVersion || copyState !== "idle"}
+                disabled={copyDisabled}
               >
                 <AnimatePresence mode="wait" initial={false}>
                   {copyState === "copied" ? (
                     <motion.span
                       key="check"
-                      initial={shouldReduceMotion ? { opacity: 0 } : { opacity: 0, scale: 0.6 }}
+                      initial={
+                        shouldReduceMotion
+                          ? { opacity: 0 }
+                          : { opacity: 0, scale: 0.6 }
+                      }
                       animate={{ opacity: 1, scale: 1 }}
-                      exit={shouldReduceMotion ? { opacity: 0 } : { opacity: 0, scale: 0.6 }}
+                      exit={
+                        shouldReduceMotion
+                          ? { opacity: 0 }
+                          : { opacity: 0, scale: 0.6 }
+                      }
                       transition={{ duration: 0.15, ease: [0.25, 1, 0.5, 1] }}
                     >
                       <Check size={16} />
@@ -227,9 +263,17 @@ export function PreviewActions() {
                   ) : (
                     <motion.span
                       key="copy"
-                      initial={shouldReduceMotion ? { opacity: 0 } : { opacity: 0, scale: 0.6 }}
+                      initial={
+                        shouldReduceMotion
+                          ? { opacity: 0 }
+                          : { opacity: 0, scale: 0.6 }
+                      }
                       animate={{ opacity: 1, scale: 1 }}
-                      exit={shouldReduceMotion ? { opacity: 0 } : { opacity: 0, scale: 0.6 }}
+                      exit={
+                        shouldReduceMotion
+                          ? { opacity: 0 }
+                          : { opacity: 0, scale: 0.6 }
+                      }
                       transition={{ duration: 0.15, ease: [0.25, 1, 0.5, 1] }}
                     >
                       <Copy size={16} />
@@ -246,21 +290,29 @@ export function PreviewActions() {
         </Tooltip>
         <Tooltip>
           <TooltipTrigger
-            disabled={loading || !selectedVersion || downloaded}
+            disabled={downloadDisabled}
             render={
               <Button
                 variant="ghost"
                 onClick={() => download(selectedVersion!.id)}
                 size="icon-lg"
-                disabled={loading || !selectedVersion || downloaded}
+                disabled={downloadDisabled}
               >
                 <AnimatePresence mode="wait" initial={false}>
                   {downloaded ? (
                     <motion.span
                       key={`check-${downloadedKey}`}
-                      initial={shouldReduceMotion ? { opacity: 0 } : { opacity: 0, scale: 0.6 }}
+                      initial={
+                        shouldReduceMotion
+                          ? { opacity: 0 }
+                          : { opacity: 0, scale: 0.6 }
+                      }
                       animate={{ opacity: 1, scale: 1 }}
-                      exit={shouldReduceMotion ? { opacity: 0 } : { opacity: 0, scale: 0.6 }}
+                      exit={
+                        shouldReduceMotion
+                          ? { opacity: 0 }
+                          : { opacity: 0, scale: 0.6 }
+                      }
                       transition={{ duration: 0.15, ease: [0.25, 1, 0.5, 1] }}
                     >
                       <Check size={16} />
@@ -268,9 +320,17 @@ export function PreviewActions() {
                   ) : (
                     <motion.span
                       key="arrow"
-                      initial={shouldReduceMotion ? { opacity: 0 } : { opacity: 0, scale: 0.6 }}
+                      initial={
+                        shouldReduceMotion
+                          ? { opacity: 0 }
+                          : { opacity: 0, scale: 0.6 }
+                      }
                       animate={{ opacity: 1, scale: 1 }}
-                      exit={shouldReduceMotion ? { opacity: 0 } : { opacity: 0, scale: 0.6 }}
+                      exit={
+                        shouldReduceMotion
+                          ? { opacity: 0 }
+                          : { opacity: 0, scale: 0.6 }
+                      }
                       transition={{ duration: 0.15, ease: [0.25, 1, 0.5, 1] }}
                     >
                       <ArrowDown size={18} />

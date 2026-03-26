@@ -19,10 +19,10 @@ export function Preview() {
   const shouldReduceMotion = useReducedMotion();
 
   return (
-    <div className="w-full flex-1 flex flex-col items-center justify-center gap-2">
+    <div className="w-full max-w-5xl flex-1 flex flex-col items-center justify-center gap-2">
       <PreviewActions />
       <div
-        className="relative w-full overflow-hidden rounded-xl"
+        className="relative w-full overflow-hidden rounded-md"
         style={{ aspectRatio: "16/9" }}
       >
         <AnimatePresence mode="sync">
@@ -40,7 +40,7 @@ export function Preview() {
           ) : selectedVersion ? (
             <motion.img
               key={`image-${selectedVersion.id}`}
-              src={`data:${selectedVersion.mimeType};base64,${selectedVersion.imageBase64}`}
+              src={selectedVersion.imageUrl}
               alt={`Thumbnail v${selectedVersion.id}`}
               className="absolute inset-0 w-full h-full object-cover select-none"
               draggable={false}

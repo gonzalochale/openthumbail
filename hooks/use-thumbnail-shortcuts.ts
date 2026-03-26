@@ -6,19 +6,27 @@ import { useThumbnailStore } from "@/store/use-thumbnail-store";
 export function useThumbnailShortcuts() {
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
-      const { versions, selectedVersionId, loading, download, copy, selectVersion } =
-        useThumbnailStore.getState();
+      const {
+        versions,
+        selectedVersionId,
+        loading,
+        downloading,
+        copying,
+        download,
+        copy,
+        selectVersion,
+      } = useThumbnailStore.getState();
       const selectedVersion = versions.find((v) => v.id === selectedVersionId);
 
       if ((e.metaKey || e.ctrlKey) && e.key === "s") {
-        if (!selectedVersion || loading) return;
+        if (!selectedVersion || loading || downloading) return;
         e.preventDefault();
         download(selectedVersion.id);
         return;
       }
 
       if ((e.metaKey || e.ctrlKey) && e.key === "c") {
-        if (!selectedVersion || loading) return;
+        if (!selectedVersion || loading || copying) return;
         if (window.getSelection()?.toString()) return;
         e.preventDefault();
         copy(selectedVersion.id);

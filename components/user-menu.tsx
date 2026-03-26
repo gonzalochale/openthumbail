@@ -1,7 +1,5 @@
 "use client";
 
-import { useState } from "react";
-import { LogOut } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Tooltip,
@@ -9,129 +7,53 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { authClient } from "@/lib/auth-client";
-import {
-  AnimatePresence,
-  LayoutGroup,
-  motion,
-  useReducedMotion,
-} from "motion/react";
-import { useCredits } from "@/hooks/use-credits";
 import { useThumbnailStore } from "@/store/use-thumbnail-store";
-import { CreditsModal } from "@/components/credits-modal";
 import NumberFlow from "@number-flow/react";
-import { useRouter } from "next/navigation";
 import { InfoModal } from "@/components/info-modal";
-import { AuthModal } from "./auth-modal";
+import { SidebarTrigger } from "@/components/ui/sidebar";
+import { Skeleton } from "./ui/skeleton";
 
 export function UserMenu() {
-  const router = useRouter();
   const { data: session, isPending } = authClient.useSession();
-  const [creditsOpen, setCreditsOpen] = useState(false);
-  const [authModalOpen, setAuthModalOpen] = useState(false);
-
-  useCredits();
   const credits = useThumbnailStore((s) => s.credits);
-  const clear = useThumbnailStore((s) => s.clear);
-
-  async function handleSignOut() {
-    try {
-      await authClient.signOut();
-    } finally {
-      clear();
-      router.refresh();
-    }
-  }
-
-  const shouldReduceMotion = useReducedMotion();
-  const springTransition = {
-    type: "spring",
-    bounce: 0,
-    duration: 0.6,
-  } as const;
-  const motionProps = {
-    initial: shouldReduceMotion
-      ? { opacity: 0 }
-      : { opacity: 0, filter: "blur(5px)" },
-    animate: shouldReduceMotion
-      ? { opacity: 1 }
-      : { opacity: 1, filter: "blur(0px)" },
-    exit: shouldReduceMotion
-      ? { opacity: 0 }
-      : { opacity: 0, filter: "blur(5px)" },
-    transition: springTransition,
-  };
+  const openCreditsModal = useThumbnailStore((s) => s.openCreditsModal);
+  const openAuthModal = useThumbnailStore((s) => s.openAuthModal);
 
   return (
-    <>
-      <AnimatePresence mode="wait">
-        {!isPending && !session && (
-          <motion.header
-            key="unauthenticated"
-            className="w-full flex items-center justify-end"
-            {...motionProps}
+    <header className="w-full flex items-center justify-between gap-2">
+      <SidebarTrigger />
+      <div className="flex items-center gap-2">
+        <InfoModal />
+        {isPending ? (
+          <Skeleton className="w-28 h-8" />
+        ) : session ? (
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  variant="outline"
+                  size="lg"
+                  className="w-28 justify-between gap-5"
+                  onClick={openCreditsModal}
+                >
+                  Credits
+                  <NumberFlow value={credits ?? 0} />
+                </Button>
+              }
+            />
+            <TooltipContent>Add credits</TooltipContent>
+          </Tooltip>
+        ) : (
+          <Button
+            size="lg"
+            variant="outline"
+            className="w-28"
+            onClick={openAuthModal}
           >
-            <InfoModal />
-            <Button
-              size="lg"
-              variant="ghost"
-              onClick={() => setAuthModalOpen(true)}
-            >
-              Log in
-            </Button>
-          </motion.header>
+            Log in
+          </Button>
         )}
-        {!isPending && session && (
-          <LayoutGroup key="authenticated">
-            <motion.header
-              layout
-              className="w-full flex items-center justify-end gap-2"
-              {...motionProps}
-              transition={{
-                layout: springTransition,
-                default: springTransition,
-              }}
-            >
-              <InfoModal />
-              <motion.div layout transition={springTransition}>
-                <Tooltip>
-                  <TooltipTrigger
-                    render={
-                      <Button
-                        variant="secondary"
-                        size="lg"
-                        className="w-28 justify-between gap-5"
-                        onClick={() => setCreditsOpen(true)}
-                      >
-                        Credits
-                        <NumberFlow value={credits ?? 0} />
-                      </Button>
-                    }
-                  />
-                  <TooltipContent>Add credits</TooltipContent>
-                </Tooltip>
-              </motion.div>
-              <motion.div layout transition={springTransition}>
-                <Tooltip>
-                  <TooltipTrigger
-                    render={
-                      <Button
-                        variant="destructive"
-                        size="icon-lg"
-                        onClick={handleSignOut}
-                      >
-                        <LogOut className="size-3.5" />
-                      </Button>
-                    }
-                  />
-                  <TooltipContent>Sign out</TooltipContent>
-                </Tooltip>
-              </motion.div>
-            </motion.header>
-          </LayoutGroup>
-        )}
-      </AnimatePresence>
-      <AuthModal open={authModalOpen} onOpenChange={setAuthModalOpen} />
-      <CreditsModal open={creditsOpen} onOpenChange={setCreditsOpen} />
-    </>
+      </div>
+    </header>
   );
 }

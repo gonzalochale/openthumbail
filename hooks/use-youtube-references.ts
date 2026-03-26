@@ -54,12 +54,16 @@ export function useYouTubeReferences({
   );
 
   const channelWidgetsRef = useRef(new Map<string, ChannelWidget>());
+  const videoChipsRef = useRef<VideoChip[]>([]);
   const fetchChannelRef = useRef<((handle: string) => Promise<void>) | null>(
     null,
   );
   useEffect(() => {
     channelWidgetsRef.current = channelWidgets;
   }, [channelWidgets]);
+  useEffect(() => {
+    videoChipsRef.current = videoChips;
+  }, [videoChips]);
   useEffect(() => {
     if (!isAuthenticated) return;
     seenUnauthRef.current.videoIds.clear();
@@ -103,9 +107,9 @@ export function useYouTubeReferences({
     async (handle: string) => {
       if (!requireAuth(handle, seenUnauthRef.current.handles)) return;
       const totalUsed =
-        videoChips.filter((c) => c.stage !== "error").length +
+        videoChipsRef.current.filter((c) => c.stage !== "error").length +
         videoInflightRef.current.size +
-        countChannelThumbnails(channelWidgets);
+        countChannelThumbnails(channelWidgetsRef.current);
       if (totalUsed >= MAX_FILES) {
         setChannelWidgets((prev) =>
           new Map(prev).set(handle, { stage: "error", handle }),
@@ -157,7 +161,7 @@ export function useYouTubeReferences({
         inflightHandlesRef.current.delete(handle);
       }
     },
-    [videoChips, channelWidgets, requireAuth, getChannel, setChannel],
+    [requireAuth, getChannel, setChannel],
   );
   useEffect(() => {
     fetchChannelRef.current = fetchChannel;
@@ -167,11 +171,11 @@ export function useYouTubeReferences({
     async (videoId: string, originalUrl: string) => {
       if (!requireAuth(videoId, seenUnauthRef.current.videoIds)) return;
       if (videoInflightRef.current.has(videoId)) return;
-      if (videoChips.some((c) => c.videoId === videoId)) return;
+      if (videoChipsRef.current.some((c) => c.videoId === videoId)) return;
       const totalUsed =
-        videoChips.length +
+        videoChipsRef.current.length +
         videoInflightRef.current.size +
-        countChannelThumbnails(channelWidgets);
+        countChannelThumbnails(channelWidgetsRef.current);
       if (totalUsed >= MAX_FILES) {
         toast(`You've reached the ${MAX_FILES} reference image limit`);
         return;
@@ -234,7 +238,7 @@ export function useYouTubeReferences({
         videoInflightRef.current.delete(videoId);
       }
     },
-    [videoChips, channelWidgets, requireAuth, getVideo, setVideo],
+    [requireAuth, getVideo, setVideo],
   );
 
   const processValueChange = useCallback(

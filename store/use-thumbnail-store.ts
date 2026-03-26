@@ -4,7 +4,8 @@ import { toast } from "sonner";
 
 export interface ThumbnailVersion {
   id: number;
-  imageBase64: string;
+  generationId?: string;
+  imageUrl: string;
   mimeType: string;
   prompt: string;
   rawPrompt?: string;
@@ -15,6 +16,7 @@ export interface ThumbnailVersion {
 interface ThumbnailState {
   versions: ThumbnailVersion[];
   selectedVersionId: number | null;
+  sessionId: string | null;
   loading: boolean;
   generating: boolean;
   error: string | null;
@@ -22,16 +24,29 @@ interface ThumbnailState {
   credits: number | null;
   addVersion: (v: Omit<ThumbnailVersion, "id">) => void;
   selectVersion: (id: number) => void;
+  setSessionId: (id: string) => void;
   setLoading: (loading: boolean) => void;
   startGenerating: () => void;
   setError: (error: string) => void;
   setPendingPrompt: (prompt: string | null) => void;
   setCredits: (credits: number) => void;
   decrementCredits: () => void;
+  loadSession: (
+    sessionId: string,
+    versions: Omit<ThumbnailVersion, "id">[],
+  ) => void;
   downloadTick: number;
-  download: (id?: number) => void;
+  downloading: boolean;
+  download: (id?: number) => Promise<void>;
   copyTick: number;
+  copying: boolean;
   copy: (id?: number) => Promise<void>;
+  authModalOpen: boolean;
+  creditsModalOpen: boolean;
+  openAuthModal: () => void;
+  closeAuthModal: () => void;
+  openCreditsModal: () => void;
+  closeCreditsModal: () => void;
   clear: () => void;
   clearHistory: () => void;
 }
@@ -41,13 +56,23 @@ export const useThumbnailStore = create<ThumbnailState>()(
     (set, get) => ({
       versions: [],
       selectedVersionId: null,
+      sessionId: null,
       loading: false,
       generating: false,
       error: null,
       pendingPrompt: null,
       credits: null,
       downloadTick: 0,
+      downloading: false,
       copyTick: 0,
+      copying: false,
+      authModalOpen: false,
+      creditsModalOpen: false,
+
+      openAuthModal: () => set({ authModalOpen: true }),
+      closeAuthModal: () => set({ authModalOpen: false }),
+      openCreditsModal: () => set({ creditsModalOpen: true }),
+      closeCreditsModal: () => set({ creditsModalOpen: false }),
 
       addVersion: (versionData) =>
         set((state) => {
@@ -63,6 +88,19 @@ export const useThumbnailStore = create<ThumbnailState>()(
         }),
 
       selectVersion: (id) => set({ selectedVersionId: id }),
+
+      setSessionId: (id) => set({ sessionId: id }),
+
+      loadSession: (sessionId, versionData) => {
+        const versions = versionData.map((v, i) => ({ ...v, id: i }));
+        set({
+          sessionId,
+          versions,
+          selectedVersionId:
+            versions.length > 0 ? versions[versions.length - 1].id : null,
+          error: null,
+        });
+      },
 
       setLoading: (loading) =>
         set(loading ? { loading } : { loading, generating: false }),
@@ -81,41 +119,71 @@ export const useThumbnailStore = create<ThumbnailState>()(
             state.credits !== null ? Math.max(0, state.credits - 1) : null,
         })),
 
-      download: (id) => {
+      download: async (id) => {
+        if (get().downloading) return;
         const { versions, selectedVersionId } = get();
-        const targetId = id ?? selectedVersionId;
-        const version = versions.find((v) => v.id === targetId);
+        const version = versions.find(
+          (v) => v.id === (id ?? selectedVersionId),
+        );
         if (!version) return;
-        const a = document.createElement("a");
-        a.href = `data:${version.mimeType};base64,${version.imageBase64}`;
-        a.download = `thumbnail-v${version.id}.png`;
-        a.click();
-        set((state) => ({ downloadTick: state.downloadTick + 1 }));
-      },
-
-      copy: async (id) => {
-        const { versions, selectedVersionId } = get();
-        const targetId = id ?? selectedVersionId;
-        const version = versions.find((v) => v.id === targetId);
-        if (!version) return;
-        if (typeof ClipboardItem === "undefined") return;
+        set({ downloading: true });
         try {
-          const bytes = Uint8Array.from(atob(version.imageBase64), (c) => c.charCodeAt(0));
-          const blob = new Blob([bytes], { type: version.mimeType });
-          await navigator.clipboard.write([new ClipboardItem({ [version.mimeType]: blob })]);
-          set((state) => ({ copyTick: state.copyTick + 1 }));
+          const res = await fetch(`${version.imageUrl}?blob=1`);
+          const blob = await res.blob();
+          const blobUrl = URL.createObjectURL(blob);
+          const a = document.createElement("a");
+          a.href = blobUrl;
+          a.download = `thumbnail-v${version.id}.png`;
+          a.click();
+          setTimeout(() => URL.revokeObjectURL(blobUrl), 100);
+          set((state) => ({
+            downloading: false,
+            downloadTick: state.downloadTick + 1,
+          }));
         } catch {
-          toast("Failed to copy to clipboard");
+          set({ downloading: false });
         }
       },
 
-      clear: () => set({ versions: [], selectedVersionId: null, error: null }),
+      copy: async (id) => {
+        if (get().copying) return;
+        const { versions, selectedVersionId } = get();
+        const version = versions.find(
+          (v) => v.id === (id ?? selectedVersionId),
+        );
+        if (!version) return;
+        if (typeof ClipboardItem === "undefined") return;
+        set({ copying: true });
+        try {
+          const res = await fetch(`${version.imageUrl}?blob=1`);
+          const blob = await res.blob();
+          await navigator.clipboard.write([
+            new ClipboardItem({ [version.mimeType]: blob }),
+          ]);
+          set((state) => ({ copying: false, copyTick: state.copyTick + 1 }));
+        } catch {
+          toast("Failed to copy to clipboard");
+          set({ copying: false });
+        }
+      },
 
-      clearHistory: () => set({ versions: [], selectedVersionId: null }),
+      clear: () =>
+        set({
+          versions: [],
+          selectedVersionId: null,
+          sessionId: null,
+          error: null,
+        }),
+
+      clearHistory: () =>
+        set({ versions: [], selectedVersionId: null, sessionId: null }),
     }),
     {
       name: "thumbnail-store",
-      partialize: (state) => ({ pendingPrompt: state.pendingPrompt }),
+      partialize: (state) => ({
+        pendingPrompt: state.pendingPrompt,
+        sessionId: state.sessionId,
+      }),
     },
   ),
 );

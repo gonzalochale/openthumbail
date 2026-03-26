@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
-import { ArrowUp, Paperclip, X } from "lucide-react";
+import { ArrowUp, Paperclip } from "lucide-react";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { useThumbnailStore } from "@/store/use-thumbnail-store";
 import { useShallow } from "zustand/react/shallow";
@@ -18,14 +18,7 @@ import {
   FileUploadTrigger,
   FileUploadContent,
 } from "@/components/file-upload";
-import {
-  HoverCard,
-  HoverCardContent,
-  HoverCardTrigger,
-} from "@/components/ui/hover-card";
 import { authClient } from "@/lib/auth-client";
-import { AuthModal } from "@/components/auth-modal";
-import { CreditsModal } from "@/components/credits-modal";
 import { randomItem, resizeAndToBase64 } from "@/lib/utils";
 import { MAX_PROMPT_LENGTH, PROMPT_PLACEHOLDERS } from "@/lib/constants";
 import {
@@ -39,8 +32,7 @@ import { getTextSegments } from "@/lib/text-segments";
 import { useThumbnailShortcuts } from "@/hooks/use-thumbnail-shortcuts";
 import { useYouTubeReferences } from "@/hooks/use-youtube-references";
 import { PromptTextOverlay } from "@/components/prompt-text-overlay";
-
-type FileEntry = { file: File; url: string };
+import { FileChipList, type FileEntry } from "@/components/file-chip-list";
 
 export function GeneratePrompt() {
   useThumbnailShortcuts();
@@ -56,8 +48,8 @@ export function GeneratePrompt() {
   const [fileHoverOpen, setFileHoverOpen] = useState<boolean | undefined>(
     false,
   );
-  const [authModalOpen, setAuthModalOpen] = useState(false);
-  const [creditsModalOpen, setCreditsModalOpen] = useState(false);
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
 
   const pendingActionRef = useRef<"submit" | "attach" | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -67,24 +59,32 @@ export function GeneratePrompt() {
   const {
     versions,
     selectedVersionId,
+    sessionId,
     loading,
     setLoading,
     startGenerating,
     addVersion,
+    setSessionId,
     pendingPrompt,
     setPendingPrompt,
     decrementCredits,
+    openAuthModal,
+    openCreditsModal,
   } = useThumbnailStore(
     useShallow((s) => ({
       versions: s.versions,
       selectedVersionId: s.selectedVersionId,
+      sessionId: s.sessionId,
       loading: s.loading,
       setLoading: s.setLoading,
       startGenerating: s.startGenerating,
       addVersion: s.addVersion,
+      setSessionId: s.setSessionId,
       pendingPrompt: s.pendingPrompt,
       setPendingPrompt: s.setPendingPrompt,
       decrementCredits: s.decrementCredits,
+      openAuthModal: s.openAuthModal,
+      openCreditsModal: s.openCreditsModal,
     })),
   );
 
@@ -94,13 +94,13 @@ export function GeneratePrompt() {
         setPrompt((prev) => prev.replace(originalUrl, title));
       },
       isAuthenticated: !!session,
-      onAuthRequired: () => setAuthModalOpen(true),
+      onAuthRequired: () => openAuthModal(),
     });
 
   function addFiles(newFiles: File[]) {
     if (!session) {
       pendingActionRef.current = "attach";
-      setAuthModalOpen(true);
+      openAuthModal();
       return;
     }
     if (selectedVersionId !== null) return;
@@ -191,55 +191,57 @@ export function GeneratePrompt() {
       const selectedVersion = versions.find((v) => v.id === selectedVersionId);
 
       try {
-        let previousVersion:
-          | {
-              imageBase64: string;
-              mimeType: string;
-              enhancedPrompt: string | null;
-            }
-          | undefined;
-
-        if (selectedVersion) {
-          previousVersion = {
-            imageBase64: selectedVersion.imageBase64,
-            mimeType: selectedVersion.mimeType,
-            enhancedPrompt: selectedVersion.enhancedPrompt,
-          };
-        } else if (entriesToSubmit.length > 0) {
-          previousVersion = {
-            imageBase64: await resizeAndToBase64(entriesToSubmit[0].file),
-            mimeType: "image/jpeg",
-            enhancedPrompt: null,
-          };
+        let activeSessionId = sessionId;
+        if (!activeSessionId) {
+          const sessionRes = await fetch("/api/sessions", { method: "POST" });
+          if (!sessionRes.ok) throw new Error("Failed to create session");
+          const sessionData = await sessionRes.json();
+          if (!sessionData.id) throw new Error("Invalid session response");
+          activeSessionId = sessionData.id as string;
+          setSessionId(activeSessionId);
         }
+
+        const uploadedImage =
+          !selectedVersion && entriesToSubmit.length > 0
+            ? {
+                imageBase64: await resizeAndToBase64(entriesToSubmit[0].file),
+                mimeType: "image/jpeg",
+              }
+            : undefined;
 
         const res = await fetch("/api/generate", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             prompt: sendPrompt,
-            previousVersion,
+            uploadedImage,
             channelRefs: channelRefs.length > 0 ? channelRefs : undefined,
             videoRefs: videoRefs.length > 0 ? videoRefs : undefined,
+            sessionId: activeSessionId,
+            previousGenerationId: selectedVersion?.generationId,
           }),
         });
         const data = await res.json();
         if (res.status === 402) {
           setLoading(false);
-          setCreditsModalOpen(true);
+          openCreditsModal();
           return;
         }
         if (!res.ok) throw new Error(data.error ?? "Unknown error");
 
         decrementCredits();
         addVersion({
-          imageBase64: data.image,
+          generationId: data.generationId,
+          imageUrl: `/api/images/${data.generationId}`,
           mimeType: data.mimeType,
           enhancedPrompt: data.enhancedPrompt ?? null,
           prompt: sendPrompt,
           rawPrompt: videoChipsSnapshot
             .filter(isFoundVideoChip)
-            .reduce((acc, c) => acc.replaceAll(c.title, c.originalUrl), trimmed),
+            .reduce(
+              (acc, c) => acc.replaceAll(c.title, c.originalUrl),
+              trimmed,
+            ),
           createdAt: Date.now(),
         });
       } catch (err) {
@@ -257,8 +259,10 @@ export function GeneratePrompt() {
       loading,
       versions,
       selectedVersionId,
+      sessionId,
       startGenerating,
       addVersion,
+      setSessionId,
       setLoading,
       decrementCredits,
       clearAll,
@@ -281,7 +285,7 @@ export function GeneratePrompt() {
     if (!hasContent || loading) return;
     if (!session) {
       if (effectivePrompt) setPendingPrompt(effectivePrompt);
-      setAuthModalOpen(true);
+      openAuthModal();
       return;
     }
     doSubmit(prompt);
@@ -355,13 +359,18 @@ export function GeneratePrompt() {
         const end = offset + seg.text.length;
         if (seg.type === "youtube-url") {
           if (
-            !e.shiftKey && !e.metaKey && !e.ctrlKey && !e.altKey &&
+            !e.shiftKey &&
+            !e.metaKey &&
+            !e.ctrlKey &&
+            !e.altKey &&
             selectionStart === selectionEnd
           ) {
             const jumpTo =
-              e.key === "ArrowLeft" && selectionStart === end ? start :
-              e.key === "ArrowRight" && selectionStart === start ? end :
-              null;
+              e.key === "ArrowLeft" && selectionStart === end
+                ? start
+                : e.key === "ArrowRight" && selectionStart === start
+                  ? end
+                  : null;
             if (jumpTo !== null) {
               e.preventDefault();
               requestAnimationFrame(() => {
@@ -445,7 +454,8 @@ export function GeneratePrompt() {
     loading && lastSubmittedPromptRef.current
       ? lastSubmittedPromptRef.current
       : selectedVersionId !== null
-        ? (selectedVersion?.prompt ?? `Describe changes from v${selectedVersionId}…`)
+        ? (selectedVersion?.prompt ??
+          `Describe changes from v${selectedVersionId}…`)
         : randomPlaceholder;
 
   return (
@@ -469,118 +479,13 @@ export function GeneratePrompt() {
               if (pendingDeleteVideoId) setPendingDeleteVideoId(null);
             }}
           >
-            <AnimatePresence initial={false}>
-              {fileEntries.length > 0 && (
-                <motion.div
-                  key="chips"
-                  initial={
-                    shouldReduceMotion
-                      ? { opacity: 0 }
-                      : { height: 0, opacity: 0 }
-                  }
-                  animate={
-                    shouldReduceMotion
-                      ? { opacity: 1 }
-                      : { height: "auto", opacity: 1 }
-                  }
-                  exit={
-                    shouldReduceMotion
-                      ? { opacity: 0 }
-                      : { height: 0, opacity: 0 }
-                  }
-                  transition={{ duration: 0.22, ease: [0.25, 1, 0.5, 1] }}
-                  style={{ overflow: "hidden" }}
-                >
-                  <div className="flex flex-wrap gap-2 px-2 pt-2 pb-1">
-                    <AnimatePresence mode="popLayout">
-                      {fileEntries.map(({ file, url }, index) => (
-                        <motion.div
-                          key={url}
-                          initial={
-                            shouldReduceMotion
-                              ? { opacity: 0 }
-                              : { opacity: 0, scale: 0.85, filter: "blur(4px)" }
-                          }
-                          animate={
-                            shouldReduceMotion
-                              ? { opacity: 1 }
-                              : { opacity: 1, scale: 1, filter: "blur(0px)" }
-                          }
-                          exit={
-                            shouldReduceMotion
-                              ? { opacity: 0 }
-                              : { opacity: 0, scale: 0.85 }
-                          }
-                          transition={{
-                            duration: 0.2,
-                            ease: [0.25, 1, 0.5, 1],
-                          }}
-                          className={`bg-background border rounded-lg text-sm overflow-hidden transition-shadow duration-150 ${pendingDeleteFile ? "ring-2 ring-offset-1 ring-offset-card ring-destructive/60" : ""}`}
-                          onClick={(e) => e.stopPropagation()}
-                        >
-                          <HoverCard
-                            open={fileHoverOpen}
-                            onOpenChange={setFileHoverOpen}
-                          >
-                            <HoverCardTrigger
-                              delay={200}
-                              closeDelay={100}
-                              render={
-                                <div className="flex items-center gap-1.5 pl-1.5 pr-2 py-1.5 cursor-default" />
-                              }
-                            >
-                              <img
-                                src={url}
-                                alt="Starting image"
-                                className="size-6 rounded-sm object-cover shrink-0"
-                                draggable={false}
-                              />
-                              <span className="text-xs font-medium leading-tight text-muted-foreground">
-                                Starting image
-                              </span>
-                              <button
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  removeFile(index);
-                                }}
-                                className={buttonVariants({
-                                  variant: "ghost",
-                                  size: "icon-sm",
-                                })}
-                              >
-                                <X className="size-3" />
-                              </button>
-                            </HoverCardTrigger>
-                            <HoverCardContent
-                              className="w-52 p-2"
-                              side="top"
-                              align="start"
-                            >
-                              <motion.img
-                                src={url}
-                                alt={file.name}
-                                className="aspect-video w-full rounded-sm object-cover"
-                                draggable={false}
-                                initial={
-                                  shouldReduceMotion
-                                    ? false
-                                    : { opacity: 0, scale: 0.95 }
-                                }
-                                animate={{ opacity: 1, scale: 1 }}
-                                transition={{
-                                  duration: 0.18,
-                                  ease: [0.25, 1, 0.5, 1],
-                                }}
-                              />
-                            </HoverCardContent>
-                          </HoverCard>
-                        </motion.div>
-                      ))}
-                    </AnimatePresence>
-                  </div>
-                </motion.div>
-              )}
-            </AnimatePresence>
+            <FileChipList
+              fileEntries={fileEntries}
+              pendingDeleteFile={pendingDeleteFile}
+              fileHoverOpen={fileHoverOpen}
+              onHoverOpenChange={setFileHoverOpen}
+              onRemove={removeFile}
+            />
             <div className="relative">
               <PromptTextOverlay
                 textSegments={textSegments}
@@ -608,9 +513,9 @@ export function GeneratePrompt() {
               />
             </div>
             <PromptInputActions className="px-1 pb-1 pt-5 justify-end">
-              {session ? (
+              {mounted && session ? (
                 <AnimatePresence initial={false}>
-                  {versions.length === 0 && (
+                  {versions.length === 0 ? (
                     <motion.div
                       key="starting-image-btn"
                       initial={
@@ -643,7 +548,7 @@ export function GeneratePrompt() {
                           : "Add starting image"}
                       </FileUploadTrigger>
                     </motion.div>
-                  )}
+                  ) : null}
                 </AnimatePresence>
               ) : (
                 <button
@@ -654,7 +559,7 @@ export function GeneratePrompt() {
                   })}
                   onClick={() => {
                     pendingActionRef.current = "attach";
-                    setAuthModalOpen(true);
+                    openAuthModal();
                   }}
                 >
                   <Paperclip className="size-4" />
@@ -685,11 +590,6 @@ export function GeneratePrompt() {
           </FileUploadContent>
         </FileUpload>
       </div>
-      <AuthModal open={authModalOpen} onOpenChange={setAuthModalOpen} />
-      <CreditsModal
-        open={creditsModalOpen}
-        onOpenChange={setCreditsModalOpen}
-      />
     </div>
   );
 }

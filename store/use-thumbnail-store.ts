@@ -189,7 +189,12 @@ export const useThumbnailStore = create<ThumbnailState>()(
         })),
 
       clearHistory: () =>
-        set({ versions: [], selectedVersionId: null, sessionId: null }),
+        set((s) => ({
+          versions: [],
+          selectedVersionId: null,
+          sessionId: null,
+          clearTick: s.clearTick + 1,
+        })),
     }),
     {
       name: "thumbnail-store",

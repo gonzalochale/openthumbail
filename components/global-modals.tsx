@@ -3,6 +3,7 @@
 import { useEffect } from "react";
 import { AuthModal } from "@/components/auth-modal";
 import { CreditsModal } from "@/components/credits-modal";
+import { InfoModal } from "@/components/info-modal";
 import { useThumbnailStore } from "@/store/use-thumbnail-store";
 import { useShallow } from "zustand/react/shallow";
 import { authClient } from "@/lib/auth-client";
@@ -27,13 +28,15 @@ export function GlobalModals() {
     window.addEventListener("focus", onFocus);
     return () => window.removeEventListener("focus", onFocus);
   }, [setCredits]);
-  const { authModalOpen, closeAuthModal, creditsModalOpen, closeCreditsModal } =
+  const { authModalOpen, closeAuthModal, creditsModalOpen, closeCreditsModal, infoModalOpen, closeInfoModal } =
     useThumbnailStore(
       useShallow((s) => ({
         authModalOpen: s.authModalOpen,
         closeAuthModal: s.closeAuthModal,
         creditsModalOpen: s.creditsModalOpen,
         closeCreditsModal: s.closeCreditsModal,
+        infoModalOpen: s.infoModalOpen,
+        closeInfoModal: s.closeInfoModal,
       })),
     );
 
@@ -46,6 +49,10 @@ export function GlobalModals() {
       <CreditsModal
         open={creditsModalOpen}
         onOpenChange={(o) => !o && closeCreditsModal()}
+      />
+      <InfoModal
+        open={infoModalOpen}
+        onOpenChange={(o) => !o && closeInfoModal()}
       />
     </>
   );

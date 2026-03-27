@@ -52,17 +52,25 @@ export function Preview() {
   const showSkeleton = generating || (!!selectedVersion && !imageLoaded);
   const showPreview = generating || versions.length > 0;
 
+  const pageVariants = {
+    initial: shouldReduceMotion ? { opacity: 0 } : { opacity: 0, y: 8 },
+    animate: shouldReduceMotion ? { opacity: 1 } : { opacity: 1, y: 0 },
+    exit: shouldReduceMotion ? { opacity: 0 } : { opacity: 0, y: 8 },
+  };
+  const pageTransition = { duration: 0.15, ease: [0.25, 1, 0.5, 1] as const };
+
   return (
     <div className="w-full max-w-5xl flex-1 flex flex-col items-center justify-center">
-      <AnimatePresence>
-        {showPreview && (
+      <AnimatePresence initial={false}>
+        {showPreview ? (
           <motion.div
             key="preview-area"
             className="w-full flex flex-col gap-2"
-            initial={shouldReduceMotion ? { opacity: 0 } : { opacity: 0, y: 8 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={shouldReduceMotion ? { opacity: 0 } : { opacity: 0, y: 8 }}
-            transition={{ duration: 0.2, ease: [0.25, 1, 0.5, 1] }}
+            variants={pageVariants}
+            initial="initial"
+            animate="animate"
+            exit="exit"
+            transition={pageTransition}
           >
             <PreviewActions />
             <div
@@ -94,6 +102,20 @@ export function Preview() {
                 )}
               </AnimatePresence>
             </div>
+          </motion.div>
+        ) : (
+          <motion.div
+            key="empty"
+            className="select-none text-center"
+            variants={pageVariants}
+            initial="initial"
+            animate="animate"
+            exit="exit"
+            transition={pageTransition}
+          >
+            <h2 className="text-2xl font-medium tracking-tight text-balance">
+              What are you creating today?
+            </h2>
           </motion.div>
         )}
       </AnimatePresence>

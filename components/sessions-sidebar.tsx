@@ -141,7 +141,7 @@ export function SessionsSidebar() {
           )}
         </AnimatePresence>
       </SidebarContent>
-      <SidebarFooter className="border-t overflow-hidden p-0">
+      <SidebarFooter className="border-t overflow-hidden p-0 select-none">
         <div ref={footerRef}>
           <div className="p-2">
             <UserMenu />

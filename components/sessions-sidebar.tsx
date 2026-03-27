@@ -30,6 +30,7 @@ export function SessionsSidebar() {
   const { isMobile, setOpenMobile } = useSidebar();
   const openAuthModal = useThumbnailStore((s) => s.openAuthModal);
   const clear = useThumbnailStore((s) => s.clear);
+  const clearHistory = useThumbnailStore((s) => s.clearHistory);
   const focusPrompt = useThumbnailStore((s) => s.focusPrompt);
   const firstGenerationId = useThumbnailStore(
     (s) => s.versions[0]?.generationId,
@@ -37,6 +38,15 @@ export function SessionsSidebar() {
   const { sessions, refresh } = useSessions();
   const prevFirstIdRef = useRef<string | null>(null);
   const [newSessionId, setNewSessionId] = useState<string | null>(null);
+  const hasUser = !!session?.user;
+  const prevHasUserRef = useRef(hasUser);
+
+  useEffect(() => {
+    if (prevHasUserRef.current && !hasUser && !authPending) {
+      clearHistory();
+    }
+    prevHasUserRef.current = hasUser;
+  }, [hasUser, authPending]);
 
   useEffect(() => {
     const firstId = sessions[0]?.id ?? null;

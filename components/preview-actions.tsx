@@ -23,6 +23,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { cn } from "@/lib/utils";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { TextShimmer } from "@/components//ui/text-shimmer";
 import { TextLoop } from "@/components//ui/text-loop";
@@ -111,7 +112,13 @@ export function PreviewActions() {
   }, [copyTick]);
 
   const selectedVersion = versions.find((v) => v.id === selectedVersionId);
-  if (!selectedVersion && !generating) return null;
+
+  const slotVariants = {
+    initial: shouldReduceMotion ? { opacity: 0 } : { y: 8, opacity: 0 },
+    animate: { y: 0, opacity: 1 },
+    exit: shouldReduceMotion ? { opacity: 0 } : { y: -8, opacity: 0 },
+  };
+  const slotTransition = { duration: 0.15, ease: [0.25, 1, 0.5, 1] as const };
 
   const copyDisabled =
     loading || !selectedVersion || copying || copyState !== "idle";
@@ -125,10 +132,11 @@ export function PreviewActions() {
           {generating ? (
             <motion.div
               key="loading"
-              initial={shouldReduceMotion ? false : { y: 8, opacity: 0 }}
-              animate={{ y: 0, opacity: 1 }}
-              exit={{ y: -8, opacity: 0 }}
-              transition={{ duration: 0.15, ease: [0.215, 0.61, 0.355, 1] }}
+              variants={slotVariants}
+              initial="initial"
+              animate="animate"
+              exit="exit"
+              transition={slotTransition}
             >
               {versions.length === 0 ? (
                 <TextShimmer className="font-mono text-sm" duration={1}>
@@ -158,20 +166,21 @@ export function PreviewActions() {
                 </TextLoop>
               )}
             </motion.div>
-          ) : (
+          ) : selectedVersion ? (
             <motion.div
-              key={`version-${selectedVersion!.id}`}
-              initial={shouldReduceMotion ? false : { y: 8, opacity: 0 }}
-              animate={{ y: 0, opacity: 1 }}
-              exit={{ y: -8, opacity: 0 }}
-              transition={{ duration: 0.15, ease: [0.215, 0.61, 0.355, 1] }}
+              key={`version-${selectedVersion.id}`}
+              variants={slotVariants}
+              initial="initial"
+              animate="animate"
+              exit="exit"
+              transition={slotTransition}
             >
               <div className="flex items-center">
                 <Button
                   variant="ghost"
                   size="icon-lg"
-                  disabled={selectedVersion!.id === 0}
-                  onClick={() => selectVersion(selectedVersion!.id - 1)}
+                  disabled={selectedVersion.id === 0}
+                  onClick={() => selectVersion(selectedVersion.id - 1)}
                 >
                   <ChevronLeft size={16} />
                 </Button>
@@ -184,14 +193,20 @@ export function PreviewActions() {
                       />
                     }
                   >
-                    v{selectedVersion!.id}
+                    v{selectedVersion.id}
                   </DropdownMenuTrigger>
-                  <DropdownMenuContent align="start" className="w-44 p-0">
+                  <DropdownMenuContent align="start" className="w-48 p-0">
+                    <div className="flex items-center justify-between px-2.5 py-2 border-b">
+                      <span className="text-xs font-medium">All versions</span>
+                      <span className="text-xs tabular-nums text-muted-foreground">
+                        {versions.length}
+                      </span>
+                    </div>
                     <ScrollArea
-                      className="max-h-64"
+                      className="max-h-60"
                       scrollbarClassName="data-vertical:w-2"
                     >
-                      <div className="p-1.5 flex flex-col gap-1">
+                      <div className="flex flex-col gap-1 p-1.5">
                         {[...versions].reverse().map((v) => (
                           <DropdownMenuItem
                             key={v.id}
@@ -202,9 +217,15 @@ export function PreviewActions() {
                                 : undefined
                             }
                             onClick={() => selectVersion(v.id)}
-                            className={`gap-2 py-2 cursor-pointer justify-between${v.id === selectedVersionId ? " bg-accent text-accent-foreground" : ""}`}
+                            className={cn(
+                              "cursor-pointer justify-between gap-2 py-2",
+                              v.id === selectedVersionId &&
+                                "bg-accent text-accent-foreground",
+                            )}
                           >
-                            <span className="font-mono text-xs">v{v.id}</span>
+                            <span className="font-mono text-xs tabular-nums">
+                              v{v.id}
+                            </span>
                             <img
                               src={v.imageUrl}
                               alt={`v${v.id}`}
@@ -220,14 +241,14 @@ export function PreviewActions() {
                 <Button
                   variant="ghost"
                   size="icon-lg"
-                  disabled={selectedVersion!.id === versions.length - 1}
-                  onClick={() => selectVersion(selectedVersion!.id + 1)}
+                  disabled={selectedVersion.id === versions.length - 1}
+                  onClick={() => selectVersion(selectedVersion.id + 1)}
                 >
                   <ChevronRight size={16} />
                 </Button>
               </div>
             </motion.div>
-          )}
+          ) : null}
         </AnimatePresence>
       </div>
       <div className="flex items-center gap-1">
@@ -237,7 +258,7 @@ export function PreviewActions() {
             render={
               <Button
                 variant="ghost"
-                onClick={() => copy(selectedVersion!.id)}
+                onClick={() => selectedVersion && copy(selectedVersion.id)}
                 size="icon-lg"
                 disabled={copyDisabled}
               >
@@ -294,7 +315,7 @@ export function PreviewActions() {
             render={
               <Button
                 variant="ghost"
-                onClick={() => download(selectedVersion!.id)}
+                onClick={() => selectedVersion && download(selectedVersion.id)}
                 size="icon-lg"
                 disabled={downloadDisabled}
               >

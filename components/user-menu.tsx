@@ -5,6 +5,7 @@ import { ChevronsUpDown, Wallet, Info } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
@@ -34,7 +35,10 @@ export function UserMenu() {
     exit: shouldReduceMotion ? {} : { opacity: 0, y: -4 },
   };
 
-  const transition = { duration: 0.2, ease: [0.25, 1, 0.5, 1] as [number, number, number, number] };
+  const transition = {
+    duration: 0.2,
+    ease: [0.25, 1, 0.5, 1] as [number, number, number, number],
+  };
 
   return (
     <AnimatePresence mode="popLayout" initial={false}>
@@ -102,14 +106,36 @@ export function UserMenu() {
                   align="start"
                   side="top"
                 >
-                  <DropdownMenuItem onClick={openCreditsModal}>
-                    <Wallet />
-                    Get credits
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={openInfoModal}>
-                    <Info />
-                    About us
-                  </DropdownMenuItem>
+                  <div className="flex items-center gap-2.5 px-2 py-2">
+                    <Avatar size="sm">
+                      <AvatarImage
+                        src={user.image ?? undefined}
+                        alt={user.name ?? ""}
+                      />
+                      <AvatarFallback>
+                        {user.name?.charAt(0).toUpperCase() ?? "?"}
+                      </AvatarFallback>
+                    </Avatar>
+                    <div className="flex min-w-0 flex-col">
+                      <span className="truncate text-xs font-medium leading-snug">
+                        {user.name ?? "—"}
+                      </span>
+                      <span className="truncate text-xs leading-snug text-muted-foreground">
+                        {user.email ?? ""}
+                      </span>
+                    </div>
+                  </div>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuGroup>
+                    <DropdownMenuItem onClick={openCreditsModal}>
+                      <Wallet />
+                      Get credits
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={openInfoModal}>
+                      <Info />
+                      About
+                    </DropdownMenuItem>
+                  </DropdownMenuGroup>
                   <DropdownMenuSeparator />
                   <SignOutButton />
                 </DropdownMenuContent>

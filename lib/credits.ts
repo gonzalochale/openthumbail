@@ -40,8 +40,8 @@ export async function grantKonamiCredits(
   try {
     await client.query("BEGIN");
     const insert = await client.query(
-      `INSERT INTO konami_redemption (email) VALUES ($1) ON CONFLICT (email) DO NOTHING`,
-      [email],
+      `INSERT INTO konami_redemption (user_id, email) VALUES ($1, $2) ON CONFLICT (email) DO NOTHING`,
+      [userId, email],
     );
     if ((insert.rowCount ?? 0) === 0) {
       await client.query("ROLLBACK");

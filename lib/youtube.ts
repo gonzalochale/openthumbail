@@ -33,13 +33,11 @@ export function isFoundVideoChip(
 }
 
 export function ytThumbnailUrl(videoId: string): string {
-  return `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`;
+  return `https://i.ytimg.com/vi/${videoId}/sddefault.jpg`;
 }
 
 export function truncateTitle(title: string, maxLength: number): string {
-  return title.length > maxLength
-    ? title.slice(0, maxLength - 1) + "…"
-    : title;
+  return title.length > maxLength ? title.slice(0, maxLength - 1) + "…" : title;
 }
 
 export const YOUTUBE_URL_RE =

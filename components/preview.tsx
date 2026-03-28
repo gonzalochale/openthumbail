@@ -74,7 +74,7 @@ export function Preview() {
           >
             <PreviewActions />
             <div
-              className="relative w-full overflow-hidden rounded-md bg-accent"
+              className="relative w-full overflow-hidden rounded-md"
               style={{ aspectRatio: "16/9" }}
             >
               <AnimatePresence>

@@ -41,3 +41,7 @@ export function formatFileSize(bytes: number): string {
 export function randomItem<T>(array: T[]): T {
   return array[Math.floor(Math.random() * array.length)];
 }
+
+export function seedFromUUID(uuid: string): number {
+  return parseInt(uuid.replace(/-/g, "").slice(0, 8), 16) & 0x7fffffff;
+}

@@ -1,39 +1,34 @@
 import { pool } from "@/lib/db";
 import { generationKey, getObjectBase64, uploadImage } from "@/lib/s3";
-import {
-  type ChannelRef,
-  type PreviousVersion,
-  type VideoRef,
-} from "@/lib/build-image-prompt";
+import type {
+  PersistGenerationParams,
+  PreviousVersion,
+} from "@/lib/generation-types";
 
-export async function persistGeneration({
-  generationId,
-  sessionId,
-  userId,
-  prompt,
-  enhancedPrompt,
-  base64,
-  previousGenerationId,
-  channelRefs,
-  videoRefs,
-}: {
-  generationId: string;
-  sessionId: string;
-  userId: string;
-  prompt: string;
-  enhancedPrompt: string;
-  base64: string;
-  previousGenerationId?: string;
-  channelRefs?: ChannelRef[];
-  videoRefs?: VideoRef[];
-}) {
+export async function persistGeneration(params: PersistGenerationParams) {
+  const {
+    generationId,
+    sessionId,
+    userId,
+    prompt,
+    enhancedPrompt,
+    base64,
+    previousGenerationId,
+    channelRefs,
+    videoRefs,
+    textThoughtSignature,
+    imageThoughtSignature,
+  } = params;
+
   const key = generationKey(userId, sessionId, generationId);
   await Promise.all([
     uploadImage(key, base64, "image/png"),
     pool.query(
       `INSERT INTO thumbnail_generation
-         (id, session_id, user_id, prompt, enhanced_prompt, image_key, mime_type, previous_generation_id, channel_refs, video_refs)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+         (id, session_id, user_id, prompt, enhanced_prompt, image_key, mime_type,
+          previous_generation_id, channel_refs, video_refs,
+          text_thought_signature, image_thought_signature)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
       [
         generationId,
         sessionId,
@@ -45,6 +40,8 @@ export async function persistGeneration({
         previousGenerationId ?? null,
         channelRefs ? JSON.stringify(channelRefs) : null,
         videoRefs ? JSON.stringify(videoRefs) : null,
+        textThoughtSignature ?? null,
+        imageThoughtSignature ?? null,
       ],
     ),
   ]);
@@ -54,17 +51,25 @@ export async function fetchPreviousVersion(
   previousGenerationId: string,
   userId: string,
 ): Promise<PreviousVersion | undefined> {
-  const prev = await pool.query<{
+  const result = await pool.query<{
     image_key: string;
     enhanced_prompt: string | null;
+    text_thought_signature: string | null;
+    image_thought_signature: string | null;
   }>(
-    `SELECT image_key, enhanced_prompt FROM thumbnail_generation WHERE id = $1 AND user_id = $2`,
+    `SELECT image_key, enhanced_prompt, text_thought_signature, image_thought_signature
+     FROM thumbnail_generation WHERE id = $1 AND user_id = $2`,
     [previousGenerationId, userId],
   );
-  if (prev.rows.length === 0) return undefined;
+
+  if (result.rows.length === 0) return undefined;
+  const row = result.rows[0];
+
   return {
-    imageBase64: await getObjectBase64(prev.rows[0].image_key),
+    imageBase64: await getObjectBase64(row.image_key),
     mimeType: "image/png",
-    enhancedPrompt: prev.rows[0].enhanced_prompt,
+    enhancedPrompt: row.enhanced_prompt,
+    textThoughtSignature: row.text_thought_signature,
+    imageThoughtSignature: row.image_thought_signature,
   };
 }

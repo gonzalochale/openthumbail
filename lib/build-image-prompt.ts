@@ -1,27 +1,19 @@
 import {
   CHANNEL_STYLE_INSTRUCTION,
+  DEFAULT_POSTAMBLE,
+  NO_TEXT_RULE,
+  PHOTOREALISM_PREAMBLE,
+  REFERENCE_IMAGES_WARNING,
   VIDEO_STYLE_INSTRUCTION,
 } from "@/lib/constants";
+import type {
+  ChannelRef,
+  PreviousVersion,
+  ReferenceImage,
+  VideoRef,
+} from "@/lib/generation-types";
 
-export interface ReferenceImage {
-  imageBase64: string;
-  mimeType: string;
-}
-
-export interface ChannelRef {
-  urls: string[];
-  handle: string;
-}
-
-export interface VideoRef {
-  url: string;
-}
-
-export interface PreviousVersion {
-  imageBase64: string;
-  mimeType: string;
-  enhancedPrompt: string | null;
-}
+export type { ChannelRef, PreviousVersion, ReferenceImage, VideoRef };
 
 export async function fetchImages(urls: string[]): Promise<ReferenceImage[]> {
   const results = await Promise.allSettled(
@@ -45,19 +37,23 @@ export async function fetchImages(urls: string[]): Promise<ReferenceImage[]> {
 
 export function buildImagePrompt({
   safePrompt,
+  userPrompt,
   channelRefs = [],
   channelImageGroups,
   videoRefs = [],
   videoImageGroups,
   previousVersion,
+  excludePreviousImage = false,
 }: {
   safePrompt: string;
+  userPrompt?: string;
   channelRefs?: ChannelRef[];
   channelImageGroups: ReferenceImage[][];
   videoRefs?: VideoRef[];
   videoImageGroups: ReferenceImage[][];
   previousVersion?: PreviousVersion;
-}): { text: string; images: Buffer[] } {
+  excludePreviousImage?: boolean;
+}): { text: string; images: ReferenceImage[] } {
   const allReferenceImages = [
     ...channelImageGroups.flat(),
     ...videoImageGroups.flat(),
@@ -82,53 +78,74 @@ export function buildImagePrompt({
       `@${ch.handle.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`,
       "gi",
     );
-
-    enriched = enriched.replace(pat, "the style from the reference images");
+    const replacement =
+      fetchedCount === 1
+        ? `the visual style from Image ${imgIdx}`
+        : `the visual style from Images ${imgIdx}–${end}`;
+    enriched = enriched.replace(pat, replacement);
     imgIdx += fetchedCount;
   }
 
-  for (const [i] of videoRefs.entries()) {
+  const videoEntries: { imgIdx: number; title?: string }[] = [];
+  for (const [i, vr] of videoRefs.entries()) {
     const fetchedCount = videoImageGroups[i]?.length ?? 0;
     if (fetchedCount === 0) continue;
-    imageGuide.push(
-      `Image ${imgIdx}: Video thumbnail — ${VIDEO_STYLE_INSTRUCTION}`,
-    );
+    videoEntries.push({ imgIdx, title: vr.title });
     imgIdx++;
   }
-
-  const photorealismPreamble = `Generate a high-quality, PHOTOREALISTIC YouTube thumbnail (16:9). Do NOT produce cartoons, illustrations, anime, or drawings unless the prompt explicitly requests that art style.`;
-  const thumbnailPostamble = `The result should look like a professional YouTube thumbnail: bold composition, high contrast, strong visual hierarchy, and immediately eye-catching.`;
+  if (videoEntries.length === 1) {
+    const { imgIdx: idx, title } = videoEntries[0];
+    const titleContext = title ? ` (video: "${title}")` : "";
+    imageGuide.push(
+      `Image ${idx}: Video thumbnail${titleContext} — ${VIDEO_STYLE_INSTRUCTION}`,
+    );
+  } else if (videoEntries.length > 1) {
+    const first = videoEntries[0].imgIdx;
+    const last = videoEntries[videoEntries.length - 1].imgIdx;
+    const titles = videoEntries
+      .filter((e) => e.title)
+      .map((e) => `"${e.title}"`)
+      .join(", ");
+    const titleContext = titles ? ` (videos: ${titles})` : "";
+    imageGuide.push(
+      `Images ${first}–${last}: Video thumbnails${titleContext} — ${VIDEO_STYLE_INSTRUCTION} Do not over-index on any single video's style; treat these as a combined aesthetic reference.`,
+    );
+  }
 
   let imagePromptText = enriched;
 
   if (hasPreviousVersion) {
-    const prevLine = `Image 1: Previously generated thumbnail — this is the base to edit. Preserve ALL visual elements that are not explicitly changed: composition, colors, style, faces, text overlays, and layout. Apply ONLY the changes described in the instruction below.`;
-    const guide = [prevLine, ...imageGuide].filter(Boolean).join("\n");
-    imagePromptText =
-      `${guide}\n\n` +
-      `Instruction: ${imagePromptText}\n\n` +
-      thumbnailPostamble;
+    const isUploadedStartingImage = previousVersion.enhancedPrompt === null;
+    const prevLine = isUploadedStartingImage
+      ? `Image 1: Starting image provided by the user. Use its content as the primary subject. If it contains people, reproduce their faces, appearance, and clothing EXACTLY as shown — do not alter, idealize, or replace them with generic faces. If it contains objects, scenery, or animals, preserve them faithfully as the main visual elements. Compose a professional YouTube thumbnail around this content.`
+      : `Image 1: Previously generated thumbnail — use as the base for editing.`;
+    const postamble = isUploadedStartingImage
+      ? `The result should look like a professional YouTube thumbnail: bold composition, high contrast, strong visual hierarchy, and immediately eye-catching. The content of Image 1 is the main subject — reproduce it faithfully. If it contains people, their faces and appearance must be identical to Image 1. If it contains objects or scenery, preserve them accurately. ${NO_TEXT_RULE}`
+      : `Apply the user's edit precisely. Remove only what is explicitly mentioned. Add only what is explicitly requested. Keep all other elements from Image 1 exactly as they appear: composition, lighting, people, colors, and background. ${NO_TEXT_RULE}`;
+    const guide = [prevLine, ...imageGuide].join("\n");
+    imagePromptText = isUploadedStartingImage
+      ? `${guide}\n\nInstruction: ${imagePromptText}\n\n${postamble}`
+      : `${guide}\n\nUser's edit request: ${userPrompt ?? imagePromptText}\nTarget state: ${imagePromptText}\n\n${postamble}`;
   } else if (hasReferenceImages) {
     imagePromptText =
-      `${photorealismPreamble}\n\n` +
+      `${PHOTOREALISM_PREAMBLE}\n\n` +
+      `${REFERENCE_IMAGES_WARNING}\n\n` +
       `${imageGuide.join("\n")}\n\n` +
       `Generate a new original YouTube thumbnail.\n\n` +
       `Instruction: ${imagePromptText}\n\n` +
-      thumbnailPostamble;
+      DEFAULT_POSTAMBLE;
   } else {
     imagePromptText =
-      `${photorealismPreamble}\n\n` +
+      `${PHOTOREALISM_PREAMBLE}\n\n` +
       `Instruction: ${imagePromptText}\n\n` +
-      thumbnailPostamble;
+      DEFAULT_POSTAMBLE;
   }
 
-  const allImages: Buffer[] = [
-    ...(hasPreviousVersion
-      ? [Buffer.from(previousVersion.imageBase64, "base64")]
+  const allImages: ReferenceImage[] = [
+    ...(hasPreviousVersion && !excludePreviousImage
+      ? [{ imageBase64: previousVersion.imageBase64, mimeType: previousVersion.mimeType }]
       : []),
-    ...(hasReferenceImages
-      ? allReferenceImages.map((r) => Buffer.from(r.imageBase64, "base64"))
-      : []),
+    ...(hasReferenceImages ? allReferenceImages : []),
   ];
 
   return { text: imagePromptText, images: allImages };

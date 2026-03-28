@@ -185,7 +185,7 @@ export function GeneratePrompt() {
 
       const videoRefs = videoChipsSnapshot
         .filter(isFoundVideoChip)
-        .map((c) => ({ url: ytThumbnailUrl(c.videoId) }));
+        .map((c) => ({ url: ytThumbnailUrl(c.videoId), title: c.title }));
 
       const entriesToSubmit = fileEntries;
       const foundChannels = [...channelWidgets.values()].filter(
@@ -241,7 +241,9 @@ export function GeneratePrompt() {
         const data = await res.json();
         if (res.status === 402) {
           if (sessionCreatedHere) {
-            fetch(`/api/sessions/${activeSessionId}`, { method: "DELETE" }).catch(() => {});
+            fetch(`/api/sessions/${activeSessionId}`, {
+              method: "DELETE",
+            }).catch(() => {});
           }
           setLoading(false);
           openCreditsModal();
@@ -538,9 +540,21 @@ export function GeneratePrompt() {
                   {versions.length === 0 ? (
                     <motion.div
                       key="starting-image-btn"
-                      initial={shouldReduceMotion ? { opacity: 0 } : { opacity: 0, scale: 0.9 }}
-                      animate={shouldReduceMotion ? { opacity: 1 } : { opacity: 1, scale: 1 }}
-                      exit={shouldReduceMotion ? { opacity: 0 } : { opacity: 0, scale: 0.9 }}
+                      initial={
+                        shouldReduceMotion
+                          ? { opacity: 0 }
+                          : { opacity: 0, scale: 0.9 }
+                      }
+                      animate={
+                        shouldReduceMotion
+                          ? { opacity: 1 }
+                          : { opacity: 1, scale: 1 }
+                      }
+                      exit={
+                        shouldReduceMotion
+                          ? { opacity: 0 }
+                          : { opacity: 0, scale: 0.9 }
+                      }
                       transition={{ duration: 0.2, ease: [0.25, 1, 0.5, 1] }}
                     >
                       <FileUploadTrigger

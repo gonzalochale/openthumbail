@@ -115,7 +115,7 @@ const PromptInputTextarea = React.forwardRef<
   HTMLTextAreaElement,
   PromptInputTextareaProps
 >(function PromptInputTextarea(
-  { className, onKeyDown, disableAutosize = false, ...props },
+  { className, onKeyDown, disableAutosize = false, placeholder, ...props },
   forwardedRef,
 ) {
   const { value, setValue, maxHeight, onSubmit, disabled, textareaRef } =
@@ -123,13 +123,24 @@ const PromptInputTextarea = React.forwardRef<
 
   const heightAnimRef = useRef<ReturnType<typeof animate> | null>(null);
 
+  const measureScrollHeight = (el: HTMLTextAreaElement) => {
+    if (!el.value && el.placeholder) {
+      el.value = el.placeholder;
+      const h = el.scrollHeight;
+      el.value = "";
+      return h;
+    }
+    return el.scrollHeight;
+  };
+
   const adjustHeight = (el: HTMLTextAreaElement | null) => {
     if (!el || disableAutosize) return;
     el.style.height = "auto";
+    const scrollH = measureScrollHeight(el);
     if (typeof maxHeight === "number") {
-      el.style.height = `${Math.min(el.scrollHeight, maxHeight)}px`;
+      el.style.height = `${Math.min(scrollH, maxHeight)}px`;
     } else {
-      el.style.height = `min(${el.scrollHeight}px, ${maxHeight})`;
+      el.style.height = `min(${scrollH}px, ${maxHeight})`;
     }
   };
 
@@ -149,10 +160,11 @@ const PromptInputTextarea = React.forwardRef<
 
     const from = el.offsetHeight;
     el.style.height = "auto";
+    const scrollH = measureScrollHeight(el);
     const to =
       typeof maxHeight === "number"
-        ? Math.min(el.scrollHeight, maxHeight)
-        : el.scrollHeight;
+        ? Math.min(scrollH, maxHeight)
+        : scrollH;
     el.style.height = `${from}px`;
 
     heightAnimRef.current?.stop();
@@ -160,7 +172,7 @@ const PromptInputTextarea = React.forwardRef<
       duration: 0.22,
       ease: [0.25, 1, 0.5, 1],
     });
-  }, [value, maxHeight, disableAutosize]);
+  }, [value, maxHeight, disableAutosize, placeholder]);
 
   const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     adjustHeight(e.target);
@@ -181,6 +193,7 @@ const PromptInputTextarea = React.forwardRef<
       value={value}
       onChange={handleChange}
       onKeyDown={handleKeyDown}
+      placeholder={placeholder}
       className={cn(
         "text-primary text-base min-h-28 sm:min-h-11 w-full resize-none border-none bg-transparent dark:bg-transparent shadow-none outline-none focus-visible:ring-0 focus-visible:ring-offset-0 [scrollbar-color:var(--border)_transparent]",
         className,

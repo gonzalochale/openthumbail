@@ -210,10 +210,11 @@ export function GeneratePrompt() {
       startGenerating();
 
       const selectedVersion = versions.find((v) => v.id === selectedVersionId);
+      let activeSessionId = versions.length > 0 ? sessionId : null;
+      const sessionCreatedHere = !activeSessionId;
+      let generationSaved = false;
 
       try {
-        let activeSessionId = versions.length > 0 ? sessionId : null;
-        const sessionCreatedHere = !activeSessionId;
         if (!activeSessionId) {
           const sessionRes = await fetch("/api/sessions", { method: "POST" });
           if (!sessionRes.ok) throw new Error("Failed to create session");
@@ -273,11 +274,17 @@ export function GeneratePrompt() {
           rawPrompt,
           createdAt: Date.now(),
         });
+        generationSaved = true;
 
         if (sessionCreatedHere) {
           router.push(`/${activeSessionId}`);
         }
       } catch (err) {
+        if (sessionCreatedHere && activeSessionId && !generationSaved) {
+          void fetch(`/api/sessions/${activeSessionId}`, {
+            method: "DELETE",
+          }).catch(() => {});
+        }
         toast(err instanceof Error ? err.message : "Something went wrong");
         setPrompt(sendPrompt);
         setLoading(false);

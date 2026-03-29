@@ -4,6 +4,7 @@ interface ThumbnailUIState {
   authModalOpen: boolean;
   creditsModalOpen: boolean;
   infoModalOpen: boolean;
+  geminiKeyModalOpen: boolean;
   promptFocusTick: number;
 
   openAuthModal: () => void;
@@ -12,6 +13,8 @@ interface ThumbnailUIState {
   closeCreditsModal: () => void;
   openInfoModal: () => void;
   closeInfoModal: () => void;
+  openGeminiKeyModal: () => void;
+  closeGeminiKeyModal: () => void;
   focusPrompt: () => void;
 }
 
@@ -19,6 +22,7 @@ export const useThumbnailUIStore = create<ThumbnailUIState>()((set) => ({
   authModalOpen: false,
   creditsModalOpen: false,
   infoModalOpen: false,
+  geminiKeyModalOpen: false,
   promptFocusTick: 0,
 
   openAuthModal: () => set({ authModalOpen: true }),
@@ -27,5 +31,7 @@ export const useThumbnailUIStore = create<ThumbnailUIState>()((set) => ({
   closeCreditsModal: () => set({ creditsModalOpen: false }),
   openInfoModal: () => set({ infoModalOpen: true }),
   closeInfoModal: () => set({ infoModalOpen: false }),
+  openGeminiKeyModal: () => set({ geminiKeyModalOpen: true }),
+  closeGeminiKeyModal: () => set({ geminiKeyModalOpen: false }),
   focusPrompt: () => set((s) => ({ promptFocusTick: s.promptFocusTick + 1 })),
 }));

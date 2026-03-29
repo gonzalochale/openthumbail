@@ -35,6 +35,7 @@ import { useThumbnailShortcuts } from "@/hooks/use-thumbnail-shortcuts";
 import { useYouTubeReferences } from "@/hooks/use-youtube-references";
 import { PromptTextOverlay } from "@/components/youtube/prompt-text-overlay";
 import { FileChipList, type FileEntry } from "@/components/file-chip-list";
+import { useUserGeminiKeyStore } from "@/store/use-user-gemini-key-store";
 
 export function GeneratePrompt() {
   useThumbnailShortcuts();
@@ -60,6 +61,7 @@ export function GeneratePrompt() {
   const overlayRef = useRef<HTMLDivElement>(null);
 
   const { data: session, isPending: sessionPending } = authClient.useSession();
+  const userGeminiApiKey = useUserGeminiKeyStore((s) => s.apiKey);
   const {
     versions,
     selectedVersionId,
@@ -235,6 +237,7 @@ export function GeneratePrompt() {
           body: JSON.stringify({
             prompt: sendPrompt,
             rawPrompt,
+            userApiKey: userGeminiApiKey || undefined,
             uploadedImage,
             channelRefs: channelRefs.length > 0 ? channelRefs : undefined,
             videoRefs: videoRefs.length > 0 ? videoRefs : undefined,
@@ -296,6 +299,7 @@ export function GeneratePrompt() {
       setLoading,
       decrementCredits,
       clearAll,
+      userGeminiApiKey,
     ],
   );
 

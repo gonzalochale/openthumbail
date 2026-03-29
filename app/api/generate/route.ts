@@ -40,6 +40,7 @@ export async function POST(req: Request) {
   const {
     prompt,
     rawPrompt,
+    userApiKey,
     uploadedImage,
     channelRefs,
     videoRefs,
@@ -48,6 +49,7 @@ export async function POST(req: Request) {
   } = body as {
     prompt: string;
     rawPrompt?: string;
+    userApiKey?: string;
     uploadedImage?: { imageBase64: string; mimeType: string };
     channelRefs?: ChannelRef[];
     videoRefs?: VideoRef[];
@@ -67,18 +69,34 @@ export async function POST(req: Request) {
     );
   }
 
-  const apiKey = process.env.GOOGLE_AI_STUDIO_API_KEY;
-  if (!apiKey) {
+  const envApiKey = process.env.GOOGLE_AI_STUDIO_API_KEY?.trim();
+  const fallbackUserApiKey = userApiKey?.trim();
+
+  let deducted = false;
+  let apiKeyToUse: string | null = null;
+
+  if (envApiKey) {
+    deducted = await deductCredit(session.user.id);
+    if (deducted) {
+      apiKeyToUse = envApiKey;
+    } else if (fallbackUserApiKey) {
+      apiKeyToUse = fallbackUserApiKey;
+    } else {
+      return Response.json(
+        { error: "Insufficient credits", code: "NO_CREDITS" },
+        { status: 402 },
+      );
+    }
+  } else if (fallbackUserApiKey) {
+    apiKeyToUse = fallbackUserApiKey;
+  } else {
     return Response.json({ error: "Error generating image" }, { status: 500 });
   }
 
-  const deducted = await deductCredit(session.user.id);
-  if (!deducted) {
-    return Response.json(
-      { error: "Insufficient credits", code: "NO_CREDITS" },
-      { status: 402 },
-    );
-  }
+  const maybeRefundCredit = async () => {
+    if (!deducted) return;
+    await refundCredit(session.user.id);
+  };
 
   try {
     const [[channelImageGroups, videoImageGroups], previousVersion] =
@@ -104,7 +122,7 @@ export async function POST(req: Request) {
       ...videoImageGroups.flat(),
     ];
     if (allRefImages.length > MAX_FILES) {
-      await refundCredit(session.user.id);
+      await maybeRefundCredit();
       return Response.json(
         { error: `Too many reference images (max ${MAX_FILES})` },
         { status: 400 },
@@ -135,7 +153,7 @@ export async function POST(req: Request) {
       });
     }
 
-    const google = createGoogleGenerativeAI({ apiKey });
+    const google = createGoogleGenerativeAI({ apiKey: apiKeyToUse });
 
     const enrichmentInput = previousVersion?.enhancedPrompt
       ? `[Previous thumbnail: "${previousVersion.enhancedPrompt}"]\nEdit: ${prompt}`
@@ -151,7 +169,7 @@ export async function POST(req: Request) {
     });
 
     if (output.blocked) {
-      await refundCredit(session.user.id);
+      await maybeRefundCredit();
       return Response.json(
         {
           error:
@@ -163,15 +181,13 @@ export async function POST(req: Request) {
 
     const safePrompt = output.prompt;
     if (!safePrompt) {
-      await refundCredit(session.user.id);
+      await maybeRefundCredit();
       return Response.json(
         { error: "Failed to validate prompt" },
         { status: 500 },
       );
     }
 
-    // Use multi-turn when editing a previous AI generation that has thought signatures.
-    // Uploaded starting images never have thought signatures (user-provided, not AI-generated).
     const isEditWithSigs =
       previousGenerationId != null &&
       previousVersion?.enhancedPrompt !== null &&
@@ -197,7 +213,7 @@ export async function POST(req: Request) {
 
     const { imageBase64, textThoughtSignature, imageThoughtSignature } =
       await callGeminiImage({
-        apiKey,
+        apiKey: apiKeyToUse,
         contents,
         seed: previousGenerationId
           ? seedFromUUID(previousGenerationId)
@@ -228,7 +244,7 @@ export async function POST(req: Request) {
       generationId,
     });
   } catch (err) {
-    await refundCredit(session.user.id);
+    await maybeRefundCredit();
     const message =
       err instanceof Error ? err.message : "Image generation failed";
     return Response.json({ error: message }, { status: 500 });

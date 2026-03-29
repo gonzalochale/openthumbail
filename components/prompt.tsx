@@ -163,16 +163,18 @@ const PromptInputTextarea = React.forwardRef<
     el.style.height = "auto";
     const scrollH = measureScrollHeight(el);
     const to =
-      typeof maxHeight === "number"
-        ? Math.min(scrollH, maxHeight)
-        : scrollH;
+      typeof maxHeight === "number" ? Math.min(scrollH, maxHeight) : scrollH;
     el.style.height = `${from}px`;
 
     heightAnimRef.current?.stop();
-    heightAnimRef.current = animate(el, { height: to }, {
-      duration: 0.22,
-      ease: [0.25, 1, 0.5, 1],
-    });
+    heightAnimRef.current = animate(
+      el,
+      { height: to },
+      {
+        duration: 0.22,
+        ease: [0.25, 1, 0.5, 1],
+      },
+    );
   }, [value, maxHeight, disableAutosize, placeholder]);
 
   const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {

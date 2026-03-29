@@ -152,11 +152,7 @@ export function GeneratePrompt() {
       if (pendingDeleteFile) setPendingDeleteFile(false);
       if (pendingDeleteVideoId) setPendingDeleteVideoId(null);
     },
-    [
-      processValueChange,
-      pendingDeleteFile,
-      pendingDeleteVideoId,
-    ],
+    [processValueChange, pendingDeleteFile, pendingDeleteVideoId],
   );
 
   const textSegments = useMemo(

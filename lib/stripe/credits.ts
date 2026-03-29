@@ -48,7 +48,7 @@ export async function grantKonamiCredits(
       return { newBalance: 0, alreadyRedeemed: true };
     }
     const result = await client.query<{ credits: number }>(
-      `UPDATE "user" SET credits = credits + 5 WHERE id = $1 RETURNING credits`,
+      `UPDATE "user" SET credits = credits + 3 WHERE id = $1 RETURNING credits`,
       [userId],
     );
     await client.query("COMMIT");

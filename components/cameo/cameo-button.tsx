@@ -10,13 +10,12 @@ import { buttonVariants } from "@/components/ui/button";
 export function CameoButton() {
   const { registered, loading: cameoLoading } = useCameoStore();
   const generatingLoading = useThumbnailStore((s) => s.loading);
-  const selectedVersionId = useThumbnailStore((s) => s.selectedVersionId);
   const openCameoModal = useThumbnailUIStore((s) => s.openCameoModal);
   const openAuthModal = useThumbnailUIStore((s) => s.openAuthModal);
   const { data: session } = authClient.useSession();
 
   const disabled = session
-    ? generatingLoading || cameoLoading || selectedVersionId !== null
+    ? generatingLoading || cameoLoading
     : generatingLoading || cameoLoading;
 
   function handleClick() {

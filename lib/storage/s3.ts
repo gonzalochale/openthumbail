@@ -2,6 +2,7 @@ import {
   S3Client,
   PutObjectCommand,
   GetObjectCommand,
+  DeleteObjectCommand,
 } from "@aws-sdk/client-s3";
 import { getSignedUrl as awsGetSignedUrl } from "@aws-sdk/s3-request-presigner";
 
@@ -14,6 +15,14 @@ const s3 = new S3Client({
 });
 
 const bucket = process.env.AWS_S3_BUCKET!;
+
+export function cameoKey(userId: string): string {
+  return `users/${userId}/cameo/composite.jpg`;
+}
+
+export async function deleteObject(key: string): Promise<void> {
+  await s3.send(new DeleteObjectCommand({ Bucket: bucket, Key: key }));
+}
 
 export function generationKey(
   userId: string,

@@ -8,7 +8,10 @@ export type TextSegment =
       type: "duplicate-channel";
       text: string;
     }
-  | { type: "youtube-url"; text: string; videoId: string };
+  | { type: "youtube-url"; text: string; videoId: string }
+  | { type: "cameo"; text: string };
+
+const CAMEO_RE = /#(me|cameo)\b/gi;
 
 const MENTION_RE = /@([\w.-]*)/g;
 
@@ -20,9 +23,19 @@ export function getTextSegments(
   type RawMatch = { start: number; end: number; segment: TextSegment };
   const matches: RawMatch[] = [];
 
+  let m: RegExpExecArray | null;
+
+  const cameoRe = new RegExp(CAMEO_RE.source, "gi");
+  while ((m = cameoRe.exec(text)) !== null) {
+    matches.push({
+      start: m.index,
+      end: m.index + m[0].length,
+      segment: { type: "cameo", text: m[0] },
+    });
+  }
+
   const mentionRe = new RegExp(MENTION_RE.source, "g");
   const seenHandles = new Set<string>();
-  let m: RegExpExecArray | null;
   while ((m = mentionRe.exec(text)) !== null) {
     const mentionText = m[0];
     const handle = m[1];

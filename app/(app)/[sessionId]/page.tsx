@@ -30,7 +30,7 @@ export default async function SessionPage({
   }
 
   const result = await pool.query(
-    `SELECT id, prompt, raw_prompt, enhanced_prompt, mime_type, created_at
+    `SELECT id, prompt, enhanced_prompt, mime_type, created_at
      FROM thumbnail_generation
      WHERE session_id = $1
      ORDER BY created_at ASC`,
@@ -40,7 +40,6 @@ export default async function SessionPage({
   const generations = result.rows.map((row) => ({
     generationId: row.id as string,
     prompt: row.prompt as string,
-    rawPrompt: (row.raw_prompt as string | null) ?? undefined,
     enhancedPrompt: row.enhanced_prompt as string | null,
     imageUrl: imageProxyUrl(row.id as string),
     mimeType: (row.mime_type as string | null) ?? "image/png",

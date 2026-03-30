@@ -1,6 +1,9 @@
 import {
+  CAMEO_INSTRUCTION,
+  CAMEO_POSTAMBLE,
   CHANNEL_STYLE_INSTRUCTION,
   DEFAULT_POSTAMBLE,
+  MAX_TOTAL_IMAGES,
   NO_TEXT_RULE,
   PHOTOREALISM_PREAMBLE,
   REFERENCE_IMAGES_WARNING,
@@ -14,6 +17,43 @@ import type {
 } from "./types";
 
 export type { ChannelRef, PreviousVersion, ReferenceImage, VideoRef };
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function replaceVideoTitleMentions({
+  input,
+  title,
+  replacement,
+}: {
+  input: string;
+  title?: string;
+  replacement: string;
+}): string {
+  if (!title) return input;
+  const normalizedTitle = title.trim();
+  if (!normalizedTitle) return input;
+
+  const escaped = escapeRegExp(normalizedTitle);
+  const patterns = [
+    new RegExp(`\"${escaped}\"`, "gi"),
+    new RegExp(`'${escaped}'`, "gi"),
+    new RegExp(`(^|[^\\w])${escaped}([^\\w]|$)`, "gi"),
+  ];
+
+  let out = input;
+  for (const pattern of patterns) {
+    out = out.replace(pattern, (full, pre, post) => {
+      if (typeof pre === "string" && typeof post === "string") {
+        return `${pre}${replacement}${post}`;
+      }
+      return replacement;
+    });
+  }
+
+  return out;
+}
 
 export async function fetchImages(urls: string[]): Promise<ReferenceImage[]> {
   const results = await Promise.allSettled(
@@ -44,6 +84,7 @@ export function buildImagePrompt({
   videoImageGroups,
   previousVersion,
   excludePreviousImage = false,
+  cameoImages,
 }: {
   safePrompt: string;
   userPrompt?: string;
@@ -53,8 +94,11 @@ export function buildImagePrompt({
   videoImageGroups: ReferenceImage[][];
   previousVersion?: PreviousVersion;
   excludePreviousImage?: boolean;
+  cameoImages?: ReferenceImage[];
 }): { text: string; images: ReferenceImage[] } {
+  const hasCameo = cameoImages && cameoImages.length > 0;
   const allReferenceImages = [
+    ...(hasCameo ? cameoImages : []),
     ...channelImageGroups.flat(),
     ...videoImageGroups.flat(),
   ];
@@ -64,51 +108,85 @@ export function buildImagePrompt({
   const imageGuide: string[] = [];
   let enriched = safePrompt;
   let imgIdx = hasPreviousVersion ? 2 : 1;
+  const usedChannelHandles: string[] = [];
+
+  if (hasCameo) {
+    imageGuide.push(CAMEO_INSTRUCTION(imgIdx));
+    imgIdx += 1;
+  }
 
   for (const [i, ch] of channelRefs.entries()) {
     const fetchedCount = channelImageGroups[i]?.length ?? 0;
     if (fetchedCount === 0) continue;
+    usedChannelHandles.push(ch.handle);
     const end = imgIdx + fetchedCount - 1;
     const range =
       fetchedCount === 1 ? `Image ${imgIdx}` : `Images ${imgIdx}–${end}`;
     imageGuide.push(
-      `${range}: Thumbnails from @${ch.handle} — ${CHANNEL_STYLE_INSTRUCTION}`,
+      `${range}: Thumbnails from @${ch.handle} — ${CHANNEL_STYLE_INSTRUCTION} Match the packaging language of this channel: focal framing, emotional intensity, color hierarchy, and thumbnail "readability" at small sizes.`,
     );
-    const pat = new RegExp(
-      `@${ch.handle.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`,
-      "gi",
-    );
+    const pat = new RegExp(`@${escapeRegExp(ch.handle)}`, "gi");
     const replacement =
       fetchedCount === 1
-        ? `the visual style from Image ${imgIdx}`
-        : `the visual style from Images ${imgIdx}–${end}`;
+        ? `the packaging style from Image ${imgIdx}`
+        : `the packaging style blended from Images ${imgIdx}–${end}`;
     enriched = enriched.replace(pat, replacement);
     imgIdx += fetchedCount;
   }
 
-  const videoEntries: { imgIdx: number; title?: string }[] = [];
+  if (usedChannelHandles.length > 1) {
+    imageGuide.push(
+      `When multiple channel references are present (${usedChannelHandles.map((h) => `@${h}`).join(", ")}), blend only their shared visual principles instead of cloning any single source. Prioritize clarity, contrast, and clickability.`,
+    );
+  }
+
+  const videoEntries: { startIdx: number; endIdx: number; title?: string }[] =
+    [];
   for (const [i, vr] of videoRefs.entries()) {
     const fetchedCount = videoImageGroups[i]?.length ?? 0;
     if (fetchedCount === 0) continue;
-    videoEntries.push({ imgIdx, title: vr.title });
-    imgIdx++;
+    const startIdx = imgIdx;
+    const endIdx = imgIdx + fetchedCount - 1;
+    videoEntries.push({ startIdx, endIdx, title: vr.title });
+
+    const titleReplacement =
+      fetchedCount === 1
+        ? `topic and style cues from Image ${startIdx}`
+        : `topic and style cues from Images ${startIdx}–${endIdx}`;
+    enriched = replaceVideoTitleMentions({
+      input: enriched,
+      title: vr.title,
+      replacement: titleReplacement,
+    });
+
+    imgIdx += fetchedCount;
   }
   if (videoEntries.length === 1) {
-    const { imgIdx: idx, title } = videoEntries[0];
+    const { startIdx, endIdx, title } = videoEntries[0];
+    const range =
+      startIdx === endIdx
+        ? `Image ${startIdx}`
+        : `Images ${startIdx}–${endIdx}`;
     const titleContext = title ? ` (video: "${title}")` : "";
     imageGuide.push(
-      `Image ${idx}: Video thumbnail${titleContext} — ${VIDEO_STYLE_INSTRUCTION}`,
+      `${range}: Video thumbnail${titleContext} — ${VIDEO_STYLE_INSTRUCTION} Extract storytelling cues from this reference (subject choice, mood, and visual hook), but keep every asset original.`,
     );
   } else if (videoEntries.length > 1) {
-    const first = videoEntries[0].imgIdx;
-    const last = videoEntries[videoEntries.length - 1].imgIdx;
+    const first = videoEntries[0].startIdx;
+    const last = videoEntries[videoEntries.length - 1].endIdx;
     const titles = videoEntries
       .filter((e) => e.title)
       .map((e) => `"${e.title}"`)
       .join(", ");
     const titleContext = titles ? ` (videos: ${titles})` : "";
     imageGuide.push(
-      `Images ${first}–${last}: Video thumbnails${titleContext} — ${VIDEO_STYLE_INSTRUCTION} Do not over-index on any single video's style; treat these as a combined aesthetic reference.`,
+      `Images ${first}–${last}: Video thumbnails${titleContext} — ${VIDEO_STYLE_INSTRUCTION} Treat this set as a multi-reference board: combine recurring motifs and avoid over-indexing on any single video.`,
+    );
+  }
+
+  if (videoEntries.length > 0) {
+    imageGuide.push(
+      `Use video references primarily to infer topical motifs and emotional angle. Use channel references primarily for packaging style (layout rhythm, emphasis, and contrast strategy).`,
     );
   }
 
@@ -127,13 +205,15 @@ export function buildImagePrompt({
       ? `${guide}\n\nInstruction: ${imagePromptText}\n\n${postamble}`
       : `${guide}\n\nUser's edit request: ${userPrompt ?? imagePromptText}\nTarget state: ${imagePromptText}\n\n${postamble}`;
   } else if (hasReferenceImages) {
+    const postamble = hasCameo ? CAMEO_POSTAMBLE : DEFAULT_POSTAMBLE;
+    const warning = hasCameo ? "" : `${REFERENCE_IMAGES_WARNING}\n\n`;
     imagePromptText =
       `${PHOTOREALISM_PREAMBLE}\n\n` +
-      `${REFERENCE_IMAGES_WARNING}\n\n` +
+      warning +
       `${imageGuide.join("\n")}\n\n` +
       `Generate a new original YouTube thumbnail.\n\n` +
       `Instruction: ${imagePromptText}\n\n` +
-      DEFAULT_POSTAMBLE;
+      postamble;
   } else {
     imagePromptText =
       `${PHOTOREALISM_PREAMBLE}\n\n` +
@@ -143,10 +223,15 @@ export function buildImagePrompt({
 
   const allImages: ReferenceImage[] = [
     ...(hasPreviousVersion && !excludePreviousImage
-      ? [{ imageBase64: previousVersion.imageBase64, mimeType: previousVersion.mimeType }]
+      ? [
+          {
+            imageBase64: previousVersion.imageBase64,
+            mimeType: previousVersion.mimeType,
+          },
+        ]
       : []),
     ...(hasReferenceImages ? allReferenceImages : []),
   ];
 
-  return { text: imagePromptText, images: allImages };
+  return { text: imagePromptText, images: allImages.slice(0, MAX_TOTAL_IMAGES) };
 }

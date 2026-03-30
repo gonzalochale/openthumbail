@@ -7,7 +7,8 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> },
 ) {
   const session = await requireAuth();
-  if (!session) return Response.json({ error: "Unauthorized" }, { status: 401 });
+  if (!session)
+    return Response.json({ error: "Unauthorized" }, { status: 401 });
 
   const { id: sessionId } = await params;
 
@@ -22,7 +23,6 @@ export async function GET(
   const result = await pool.query<{
     id: string;
     prompt: string;
-    raw_prompt: string | null;
     enhanced_prompt: string | null;
     mime_type: string;
     previous_generation_id: string | null;
@@ -30,7 +30,7 @@ export async function GET(
     video_refs: unknown;
     created_at: string;
   }>(
-    `SELECT id, prompt, raw_prompt, enhanced_prompt, mime_type,
+    `SELECT id, prompt, enhanced_prompt, mime_type,
             previous_generation_id, channel_refs, video_refs, created_at
      FROM thumbnail_generation
      WHERE session_id = $1
@@ -41,7 +41,6 @@ export async function GET(
   const generations = result.rows.map((row) => ({
     id: row.id,
     prompt: row.prompt,
-    rawPrompt: row.raw_prompt,
     enhancedPrompt: row.enhanced_prompt,
     imageUrl: imageProxyUrl(row.id),
     mimeType: row.mime_type,
@@ -59,7 +58,8 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> },
 ) {
   const session = await requireAuth();
-  if (!session) return Response.json({ error: "Unauthorized" }, { status: 401 });
+  if (!session)
+    return Response.json({ error: "Unauthorized" }, { status: 401 });
 
   const { id: sessionId } = await params;
 

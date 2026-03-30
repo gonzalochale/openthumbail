@@ -6,16 +6,18 @@ import { deductCredit, refundCredit } from "@/lib/stripe/credits";
 import { requireAuth } from "@/lib/auth/require-auth";
 import {
   CREATE_IMAGES,
-  MAX_FILES,
+  MAX_TOTAL_IMAGES,
   MAX_PROMPT_LENGTH,
   SAFETY_MODEL,
   THUMBNAIL_SYSTEM_PROMPT,
 } from "@/lib/constants";
+import { getCameoImages } from "@/lib/cameo/service";
 import {
   buildImagePrompt,
   fetchImages,
   type ChannelRef,
   type PreviousVersion,
+  type ReferenceImage,
   type VideoRef,
 } from "@/lib/generation/build-prompt";
 import {
@@ -25,11 +27,61 @@ import {
 import { buildGeminiContents, callGeminiImage } from "@/lib/generation/gemini";
 import { seedFromUUID } from "@/lib/utils";
 
+function trimImageGroups(
+  channelGroups: ReferenceImage[][],
+  videoGroups: ReferenceImage[][],
+  maxTotal: number,
+): [ReferenceImage[][], ReferenceImage[][]] {
+  let total =
+    channelGroups.reduce((s, g) => s + g.length, 0) +
+    videoGroups.reduce((s, g) => s + g.length, 0);
+  if (total <= maxTotal) return [channelGroups, videoGroups];
+
+  const trimmedVideos = [...videoGroups];
+  while (total > maxTotal && trimmedVideos.length > 0) {
+    total -= trimmedVideos.pop()!.length;
+  }
+  if (total <= maxTotal) return [channelGroups, trimmedVideos];
+
+  const trimmedChannels = channelGroups.map((g) => [...g]);
+  for (let i = trimmedChannels.length - 1; i >= 0 && total > maxTotal; i--) {
+    const excess = total - maxTotal;
+    const removeCount = Math.min(excess, trimmedChannels[i].length);
+    trimmedChannels[i] = trimmedChannels[i].slice(
+      0,
+      trimmedChannels[i].length - removeCount,
+    );
+    total -= removeCount;
+  }
+  return [trimmedChannels, trimmedVideos];
+}
+
 const safetySchema = z.object({
   blocked: z.boolean(),
   reason: z.string().optional(),
   prompt: z.string().optional(),
 });
+
+async function resolveCameoUsage({
+  prompt,
+  isCameo,
+  userId,
+}: {
+  prompt: string;
+  isCameo?: boolean;
+  userId: string;
+}) {
+  const explicitCameoRequested =
+    Boolean(isCameo) || /#(me|cameo)\b/i.test(prompt);
+  const cameoImages = explicitCameoRequested
+    ? await getCameoImages(userId)
+    : undefined;
+
+  return {
+    cameoImages,
+    shouldUseCameo: (cameoImages?.length ?? 0) > 0,
+  };
+}
 
 export async function POST(req: Request) {
   const session = await requireAuth();
@@ -39,28 +91,32 @@ export async function POST(req: Request) {
   const body = await req.json();
   const {
     prompt,
-    rawPrompt,
+    generationPrompt,
     userApiKey,
     uploadedImage,
     channelRefs,
     videoRefs,
     sessionId,
     previousGenerationId,
+    isCameo,
   } = body as {
     prompt: string;
-    rawPrompt?: string;
+    generationPrompt?: string;
     userApiKey?: string;
     uploadedImage?: { imageBase64: string; mimeType: string };
     channelRefs?: ChannelRef[];
     videoRefs?: VideoRef[];
     sessionId?: string;
     previousGenerationId?: string;
+    isCameo?: boolean;
   };
+
+  const promptForGeneration = generationPrompt?.trim() || prompt?.trim() || "";
 
   if (!prompt?.trim()) {
     return Response.json({ error: "Message is required" }, { status: 400 });
   }
-  if (prompt.length > MAX_PROMPT_LENGTH) {
+  if (promptForGeneration.length > MAX_PROMPT_LENGTH) {
     return Response.json(
       {
         error: `Message exceeds maximum length of ${MAX_PROMPT_LENGTH} characters`,
@@ -99,6 +155,14 @@ export async function POST(req: Request) {
   };
 
   try {
+    const google = createGoogleGenerativeAI({ apiKey: apiKeyToUse });
+
+    const { cameoImages, shouldUseCameo } = await resolveCameoUsage({
+      prompt,
+      isCameo,
+      userId: session.user.id,
+    });
+
     const [[channelImageGroups, videoImageGroups], previousVersion] =
       await Promise.all([
         Promise.all([
@@ -117,17 +181,13 @@ export async function POST(req: Request) {
             ),
       ]);
 
-    const allRefImages = [
-      ...channelImageGroups.flat(),
-      ...videoImageGroups.flat(),
-    ];
-    if (allRefImages.length > MAX_FILES) {
-      await maybeRefundCredit();
-      return Response.json(
-        { error: `Too many reference images (max ${MAX_FILES})` },
-        { status: 400 },
-      );
-    }
+    const reservedSlots = (previousVersion ? 1 : 0) + (shouldUseCameo ? 1 : 0);
+    const maxRefImages = MAX_TOTAL_IMAGES - reservedSlots;
+    const [trimmedChannelGroups, trimmedVideoGroups] = trimImageGroups(
+      channelImageGroups,
+      videoImageGroups,
+      maxRefImages,
+    );
 
     if (!CREATE_IMAGES) {
       await new Promise((r) => setTimeout(r, 5000));
@@ -138,7 +198,6 @@ export async function POST(req: Request) {
           sessionId,
           userId: session.user.id,
           prompt,
-          rawPrompt,
           enhancedPrompt: prompt,
           base64: whitePng(2560, 1440),
           previousGenerationId,
@@ -153,13 +212,13 @@ export async function POST(req: Request) {
       });
     }
 
-    const google = createGoogleGenerativeAI({ apiKey: apiKeyToUse });
-
     const enrichmentInput = previousVersion?.enhancedPrompt
-      ? `[Previous thumbnail: "${previousVersion.enhancedPrompt}"]\nEdit: ${prompt}`
+      ? `[Previous thumbnail: "${previousVersion.enhancedPrompt}"]\nEdit: ${promptForGeneration}`
       : uploadedImage
-        ? `[Starting image: user provided a photo — the people in it are the main subjects]\nPrompt: ${prompt}`
-        : prompt;
+        ? `[Starting image: user provided a photo — the people in it are the main subjects]\nPrompt: ${promptForGeneration}`
+        : shouldUseCameo
+          ? `[Cameo mode]\nPrompt: ${promptForGeneration}`
+          : promptForGeneration;
 
     const { output } = await generateText({
       model: google(SAFETY_MODEL),
@@ -195,13 +254,14 @@ export async function POST(req: Request) {
 
     const { text, images } = buildImagePrompt({
       safePrompt,
-      userPrompt: prompt,
+      userPrompt: promptForGeneration,
       channelRefs,
-      channelImageGroups,
+      channelImageGroups: trimmedChannelGroups,
       videoRefs,
-      videoImageGroups,
+      videoImageGroups: trimmedVideoGroups,
       previousVersion,
       excludePreviousImage: isEditWithSigs,
+      cameoImages: cameoImages ?? undefined,
     });
 
     const contents = buildGeminiContents(
@@ -227,7 +287,6 @@ export async function POST(req: Request) {
         sessionId,
         userId: session.user.id,
         prompt,
-        rawPrompt,
         enhancedPrompt: safePrompt,
         base64: imageBase64,
         previousGenerationId,

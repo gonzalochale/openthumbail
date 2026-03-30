@@ -54,7 +54,7 @@ export const CREDIT_PLANS: Record<number, number> = {
   100: 20,
   500: 15,
 };
-export const MAX_FILES = 10;
+export const MAX_TOTAL_IMAGES = 14;
 export const MAX_PROMPT_LENGTH = 1000;
 export const DEBOUNCE_MS = 600;
 export const VIDEO_TITLE_MAX_LENGTH = 25;
@@ -82,9 +82,30 @@ Step 2 — Prompt enrichment (only if safe). Rewrite the user's prompt into a vi
 - If the instruction requests text to appear in the image, write that text in the same language the user is writing in, unless they explicitly specify a different language.
 - Do NOT add people, faces, or human subjects to the enriched description unless the user explicitly asks for them (e.g. "show a person", "include a man", "add a face"). If the user's prompt is about an object, topic, or concept, describe that — no people.
 - If the input starts with [Starting image: ...], you are in STARTING IMAGE MODE. The user provided a photo as the main subject. If that photo contains people, they are the subjects — your enriched description must direct the model to use their real faces and appearance exactly as provided, not generate new ones. Describe the scene, mood, and composition around the content of that photo.
+- If the input starts with [Cameo mode], you are in CAMEO MODE. The user wants to appear in the thumbnail using their pre-registered face references (provided as reference images). Your enriched description must include a human subject and direct the model to use the face from the Cameo reference images. Describe the scene, pose, costume, and composition as requested.
 - If the input starts with [Previous thumbnail: "..."], you are in EDIT MODE. The bracketed description is what was previously generated. The text after "Edit:" is the user's change instruction. Produce an enriched description of the FINAL RESULT after applying that change — preserving everything from the previous thumbnail that is not explicitly modified.
 - Keep the enriched prompt concise (under 400 characters)
 - Return it in the prompt field`;
+export const CAMEO_INTENT_SYSTEM_PROMPT = `
+You are a strict intent classifier for a YouTube thumbnail generator.
+
+Goal:
+- Return useCameo=true ONLY when the user clearly wants their OWN face/identity in the thumbnail.
+- Return useCameo=false otherwise.
+
+useCameo=true examples:
+- "use my face"
+- "i want to appear in the thumbnail"
+- "quiero salir yo"
+- "poneme a mi en la miniatura"
+
+useCameo=false examples:
+- Generic requests for "a person", "a man", "a woman", "a face"
+- Requests to imitate channel style
+- Any request where self-appearance is unclear or ambiguous
+
+Be conservative: if unsure, return false.
+`;
 export const CHANNEL_STYLE_INSTRUCTION = `STYLE REFERENCE ONLY — these thumbnails are provided as aesthetic inspiration. You MUST generate 100% original content.
 
 FORBIDDEN (do NOT include in your output):
@@ -116,3 +137,6 @@ export const REFERENCE_IMAGES_WARNING = `CRITICAL: The reference images below co
 export const PHOTOREALISM_PREAMBLE = `Generate a high-quality, PHOTOREALISTIC YouTube thumbnail (16:9). Do NOT produce cartoons, illustrations, anime, or drawings unless the prompt explicitly requests that art style.`;
 export const NO_TEXT_RULE = `Do NOT add any text, words, letters, numbers, or typography to the image unless the instruction explicitly requests it.`;
 export const DEFAULT_POSTAMBLE = `The result should look like a professional YouTube thumbnail: bold composition, high contrast, strong visual hierarchy, and immediately eye-catching. All people and faces must be original — do not copy or reproduce any person from the reference images. Do NOT add people, faces, or human subjects unless the instruction explicitly includes them. ${NO_TEXT_RULE}`;
+export const CAMEO_INSTRUCTION = (idx: number) =>
+  `CAMEO FACE REFERENCE (Image ${idx}): This composite image shows the same person photographed from multiple angles side by side. Synthesize all visible angles to build a precise model of this person's facial structure, skin tone, hair color, and distinctive features. You MUST render this exact person in the described scene — same face, same features, same hair. Do NOT idealize, genericize, or replace their appearance with a stock face.`;
+export const CAMEO_POSTAMBLE = `The result should look like a professional YouTube thumbnail: bold composition, high contrast, strong visual hierarchy, and immediately eye-catching. The person shown in the Cameo reference images is the main subject — render their face and appearance faithfully. ${NO_TEXT_RULE}`;

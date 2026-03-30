@@ -33,9 +33,12 @@ import {
 import { getTextSegments } from "@/lib/youtube/text-segments";
 import { useThumbnailShortcuts } from "@/hooks/use-thumbnail-shortcuts";
 import { useYouTubeReferences } from "@/hooks/use-youtube-references";
+import { useCameoReferences } from "@/hooks/use-cameo-references";
 import { PromptTextOverlay } from "@/components/youtube/prompt-text-overlay";
 import { FileChipList, type FileEntry } from "@/components/file-chip-list";
+import { CameoButton } from "@/components/cameo/cameo-button";
 import { useUserGeminiKeyStore } from "@/store/use-user-gemini-key-store";
+import { useCameoStore } from "@/store/use-cameo-store";
 
 export function GeneratePrompt() {
   useThumbnailShortcuts();
@@ -50,6 +53,9 @@ export function GeneratePrompt() {
   const [pendingDeleteVideoId, setPendingDeleteVideoId] = useState<
     string | null
   >(null);
+  const [pendingDeleteCameo, setPendingDeleteCameo] = useState<string | null>(
+    null,
+  );
   const [fileHoverOpen, setFileHoverOpen] = useState<boolean | undefined>(
     false,
   );
@@ -58,6 +64,7 @@ export function GeneratePrompt() {
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const overlayRef = useRef<HTMLDivElement>(null);
+  const prevRouteSessionIdRef = useRef<string | undefined>(params.sessionId);
 
   const { data: session } = authClient.useSession();
   const userGeminiApiKey = useUserGeminiKeyStore((s) => s.apiKey);
@@ -99,6 +106,23 @@ export function GeneratePrompt() {
     requestAnimationFrame(() => textareaRef.current?.focus());
   }, [promptFocusTick]);
 
+  useEffect(() => {
+    const prev = prevRouteSessionIdRef.current;
+    const current = params.sessionId;
+    if (prev && !current) {
+      requestAnimationFrame(() => textareaRef.current?.focus());
+    }
+    prevRouteSessionIdRef.current = current;
+  }, [params.sessionId]);
+
+  const { cameoActive } = useCameoReferences(prompt);
+  const cameoRegistered = useCameoStore((s) => s.registered);
+  const cameoLoading = useCameoStore((s) => s.loading);
+
+  const reservedSlots =
+    (selectedVersionId !== null ? 1 : 0) +
+    (cameoActive && cameoRegistered ? 1 : 0);
+
   const { channelWidgets, videoChips, processValueChange, clearAll } =
     useYouTubeReferences({
       onVideoTitleResolved: (originalUrl, title) => {
@@ -106,7 +130,10 @@ export function GeneratePrompt() {
       },
       isAuthenticated: !!session,
       onAuthRequired: () => openAuthModal(),
+      reservedSlots,
     });
+  const isStartingImageDisabled =
+    loading || cameoLoading || selectedVersionId !== null;
 
   useEffect(() => {
     if (clearTick === 0) return;
@@ -154,6 +181,7 @@ export function GeneratePrompt() {
       setPrompt(processed);
       if (pendingDeleteFile) setPendingDeleteFile(false);
       if (pendingDeleteVideoId) setPendingDeleteVideoId(null);
+      if (pendingDeleteCameo) setPendingDeleteCameo(null);
     },
     [
       session,
@@ -168,6 +196,7 @@ export function GeneratePrompt() {
     () =>
       /@/.test(prompt) ||
       /youtu/.test(prompt) ||
+      /#(me|cameo)\b/i.test(prompt) ||
       videoChips.some((c) => c.stage === "found")
         ? getTextSegments(prompt, channelWidgets, videoChips)
         : null,
@@ -186,12 +215,13 @@ export function GeneratePrompt() {
       );
       if (!validationPrompt) return;
 
-      const sendPrompt = trimmed
+      const isCameo = cameoActive && cameoRegistered;
+      const generationPrompt = trimmed
         .replace(youtubeRe(), "")
         .replace(/\s{2,}/g, " ")
         .trim();
 
-      const rawPrompt = videoChipsSnapshot
+      const sendPrompt = videoChipsSnapshot
         .filter(isFoundVideoChip)
         .reduce((acc, c) => acc.replaceAll(c.title, c.originalUrl), trimmed);
 
@@ -204,10 +234,21 @@ export function GeneratePrompt() {
         (w): w is { stage: "found"; ref: ChannelReference } =>
           w.stage === "found",
       );
-      const channelRefs = foundChannels.map((w) => ({
-        urls: w.ref.thumbnails.map((t) => t.url),
-        handle: w.ref.handle,
-      }));
+      const lowerPrompt = trimmed.toLowerCase();
+      const channelRefs = foundChannels
+        .slice()
+        .sort((a, b) => {
+          const aIdx = lowerPrompt.indexOf(`@${a.ref.handle.toLowerCase()}`);
+          const bIdx = lowerPrompt.indexOf(`@${b.ref.handle.toLowerCase()}`);
+          if (aIdx === -1 && bIdx === -1) return 0;
+          if (aIdx === -1) return 1;
+          if (bIdx === -1) return -1;
+          return aIdx - bIdx;
+        })
+        .map((w) => ({
+          urls: w.ref.thumbnails.map((t) => t.url),
+          handle: w.ref.handle,
+        }));
 
       lastSubmittedPromptRef.current = sendPrompt;
       setPrompt("");
@@ -244,13 +285,14 @@ export function GeneratePrompt() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             prompt: sendPrompt,
-            rawPrompt,
+            generationPrompt,
             userApiKey: userGeminiApiKey || undefined,
             uploadedImage,
             channelRefs: channelRefs.length > 0 ? channelRefs : undefined,
             videoRefs: videoRefs.length > 0 ? videoRefs : undefined,
             sessionId: activeSessionId,
             previousGenerationId: selectedVersion?.generationId,
+            isCameo: isCameo || undefined,
           }),
         });
         const data = await res.json();
@@ -278,7 +320,6 @@ export function GeneratePrompt() {
           mimeType: data.mimeType,
           enhancedPrompt: data.enhancedPrompt ?? null,
           prompt: sendPrompt,
-          rawPrompt,
           createdAt: Date.now(),
         });
         generationSaved = true;
@@ -314,6 +355,8 @@ export function GeneratePrompt() {
       decrementCredits,
       clearAll,
       userGeminiApiKey,
+      cameoActive,
+      cameoRegistered,
     ],
   );
 
@@ -321,9 +364,11 @@ export function GeneratePrompt() {
   const cleanedEffectivePrompt = stripVideoChips(effectivePrompt, videoChips);
   const hasDuplicateChannel =
     textSegments?.some((s) => s.type === "duplicate-channel") ?? false;
+  const hasUnregisteredCameo = cameoActive && !cameoRegistered;
   const hasContent =
     !!cleanedEffectivePrompt &&
     !hasDuplicateChannel &&
+    !hasUnregisteredCameo &&
     ![...channelWidgets.values()].some(
       (w) =>
         w.stage === "error" || w.stage === "loading" || w.stage === "empty",
@@ -350,7 +395,7 @@ export function GeneratePrompt() {
       if (e.key === "Tab" && !prompt) {
         const fill =
           selectedVersionId !== null
-            ? (selectedVersion?.rawPrompt ?? selectedVersion?.prompt)
+            ? selectedVersion?.prompt
             : textareaRef.current?.placeholder;
         if (fill) {
           e.preventDefault();
@@ -466,6 +511,62 @@ export function GeneratePrompt() {
             return;
           }
         }
+        if (seg.type === "cameo") {
+          if (
+            !e.shiftKey &&
+            !e.metaKey &&
+            !e.ctrlKey &&
+            !e.altKey &&
+            selectionStart === selectionEnd
+          ) {
+            const jumpTo =
+              e.key === "ArrowLeft" && selectionStart === end
+                ? start
+                : e.key === "ArrowRight" && selectionStart === start
+                  ? end
+                  : null;
+            if (jumpTo !== null) {
+              e.preventDefault();
+              requestAnimationFrame(() => {
+                if (textareaRef.current) {
+                  textareaRef.current.selectionStart = jumpTo;
+                  textareaRef.current.selectionEnd = jumpTo;
+                }
+              });
+              return;
+            }
+          }
+          const hitBackspace =
+            e.key === "Backspace" &&
+            selectionStart === selectionEnd &&
+            selectionStart === end;
+          const hitDelete =
+            e.key === "Delete" &&
+            selectionStart === selectionEnd &&
+            selectionStart === start;
+          const hitInside =
+            selectionStart === selectionEnd &&
+            selectionStart > start &&
+            selectionStart < end;
+          const hitSelected = selectionStart === start && selectionEnd === end;
+          if (hitBackspace || hitDelete || hitInside || hitSelected) {
+            e.preventDefault();
+            if (pendingDeleteCameo === seg.text) {
+              const newValue = prompt.slice(0, start) + prompt.slice(end);
+              handleValueChange(newValue);
+              requestAnimationFrame(() => {
+                if (textareaRef.current) {
+                  textareaRef.current.selectionStart = start;
+                  textareaRef.current.selectionEnd = start;
+                }
+              });
+              setPendingDeleteCameo(null);
+            } else {
+              setPendingDeleteCameo(seg.text);
+            }
+            return;
+          }
+        }
         offset = end;
       }
     },
@@ -478,6 +579,7 @@ export function GeneratePrompt() {
       selectedVersion,
       pendingDeleteFile,
       pendingDeleteVideoId,
+      pendingDeleteCameo,
       removeFile,
       handleValueChange,
       selectVersion,
@@ -529,7 +631,7 @@ export function GeneratePrompt() {
           onFilesAdded={addFiles}
           accept="image/*"
           multiple={false}
-          disabled={loading || selectedVersionId !== null}
+          disabled={isStartingImageDisabled}
         >
           <PromptInput
             value={prompt}
@@ -541,6 +643,7 @@ export function GeneratePrompt() {
             onClick={() => {
               if (pendingDeleteFile) setPendingDeleteFile(false);
               if (pendingDeleteVideoId) setPendingDeleteVideoId(null);
+              if (pendingDeleteCameo) setPendingDeleteCameo(null);
             }}
           >
             <FileChipList
@@ -559,6 +662,8 @@ export function GeneratePrompt() {
                 shouldReduceMotion={shouldReduceMotion}
                 prompt={prompt}
                 pendingDeleteVideoId={pendingDeleteVideoId}
+                cameoRegistered={cameoRegistered}
+                pendingDeleteCameo={pendingDeleteCameo}
               />
               <PromptInputTextarea
                 ref={textareaRef}
@@ -576,7 +681,7 @@ export function GeneratePrompt() {
                 }}
               />
             </div>
-            <PromptInputActions className="px-1 pb-1 pt-5 justify-end">
+            <PromptInputActions className="px-1 pb-1 pt-5 justify-end gap-1.5">
               {mounted && session ? (
                 <AnimatePresence initial={false}>
                   {versions.length === 0 ? (
@@ -604,12 +709,10 @@ export function GeneratePrompt() {
                           variant: "secondary",
                           size: "lg",
                         })}
-                        disabled={loading || selectedVersionId !== null}
+                        disabled={isStartingImageDisabled}
                       >
                         <Paperclip className="size-4" />
-                        {fileEntries.length > 0
-                          ? "Edit starting image"
-                          : "Add starting image"}
+                        Starting image
                       </FileUploadTrigger>
                     </m.div>
                   ) : null}
@@ -621,16 +724,16 @@ export function GeneratePrompt() {
                     variant: "secondary",
                     size: "lg",
                   })}
+                  disabled={loading || cameoLoading}
                   onClick={() => {
                     openAuthModal();
                   }}
                 >
                   <Paperclip className="size-4" />
-                  {fileEntries.length > 0
-                    ? "Edit starting image"
-                    : "Add starting image"}
+                  Starting image
                 </button>
               )}
+              <CameoButton />
               <PromptInputAction tooltip="Send">
                 <Button
                   onClick={handleSubmit}

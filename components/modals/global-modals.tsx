@@ -5,14 +5,38 @@ import { AuthModal } from "@/components/modals/auth-modal";
 import { CreditsModal } from "@/components/modals/credits-modal";
 import { GeminiKeyModal } from "@/components/modals/gemini-key-modal";
 import { InfoModal } from "@/components/modals/info-modal";
+import { CameoModal } from "@/components/cameo/cameo-modal";
 import { useThumbnailStore } from "@/store/use-thumbnail-store";
 import { useThumbnailUIStore } from "@/store/use-thumbnail-ui-store";
+import { useCameoStore } from "@/store/use-cameo-store";
 import { useShallow } from "zustand/react/shallow";
 import { authClient } from "@/lib/auth/client";
 
 export function GlobalModals() {
-  const { data: session } = authClient.useSession();
+  const { data: session, isPending } = authClient.useSession();
   const setCredits = useThumbnailStore((s) => s.setCredits);
+  const { setRegistered, setLoading } = useCameoStore(
+    useShallow((s) => ({ setRegistered: s.setRegistered, setLoading: s.setLoading })),
+  );
+
+  useEffect(() => {
+    if (isPending) return;
+    if (!session) {
+      setLoading(false);
+      return;
+    }
+    const controller = new AbortController();
+    fetch("/api/cameo", { signal: controller.signal })
+      .then((r) => r.json())
+      .then((data) => {
+        setRegistered(data.registered ?? false);
+        setLoading(false);
+      })
+      .catch((err) => {
+        if (err?.name !== "AbortError") setLoading(false);
+      });
+    return () => controller.abort();
+  }, [isPending, session?.user.id, setRegistered, setLoading]);
 
   useEffect(() => {
     if (session?.user.credits != null) {
@@ -41,6 +65,8 @@ export function GlobalModals() {
     closeInfoModal,
     geminiKeyModalOpen,
     closeGeminiKeyModal,
+    cameoModalOpen,
+    closeCameoModal,
   } = useThumbnailUIStore(
     useShallow((s) => ({
       authModalOpen: s.authModalOpen,
@@ -51,6 +77,8 @@ export function GlobalModals() {
       closeInfoModal: s.closeInfoModal,
       geminiKeyModalOpen: s.geminiKeyModalOpen,
       closeGeminiKeyModal: s.closeGeminiKeyModal,
+      cameoModalOpen: s.cameoModalOpen,
+      closeCameoModal: s.closeCameoModal,
     })),
   );
 
@@ -71,6 +99,10 @@ export function GlobalModals() {
       <GeminiKeyModal
         open={geminiKeyModalOpen}
         onOpenChange={(o) => !o && closeGeminiKeyModal()}
+      />
+      <CameoModal
+        open={cameoModalOpen}
+        onOpenChange={(o) => !o && closeCameoModal()}
       />
     </>
   );

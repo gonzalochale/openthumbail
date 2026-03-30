@@ -31,6 +31,8 @@ export function PromptTextOverlay({
   shouldReduceMotion,
   prompt,
   pendingDeleteVideoId,
+  cameoRegistered,
+  pendingDeleteCameo,
 }: {
   textSegments: TextSegment[] | null;
   videoChips: VideoChip[];
@@ -39,6 +41,8 @@ export function PromptTextOverlay({
   shouldReduceMotion: boolean | null;
   prompt: string;
   pendingDeleteVideoId?: string | null;
+  cameoRegistered?: boolean;
+  pendingDeleteCameo?: string | null;
 }) {
   const [displayedSegments, setDisplayedSegments] = useState(textSegments);
 
@@ -90,7 +94,7 @@ export function PromptTextOverlay({
       aria-hidden
       className="pointer-events-none absolute inset-0 overflow-hidden whitespace-pre-wrap wrap-break-word px-2 py-2 text-base leading-6 text-primary"
     >
-      {displayedSegments
+      {displayedSegments && prompt
         ? displayedSegments.map((p: TextSegment, i: number) => {
             if (p.type === "plain")
               return <span key={`plain-${i}`}>{p.text}</span>;
@@ -162,6 +166,56 @@ export function PromptTextOverlay({
                     )}
                   </HoverCardContent>
                 </HoverCard>
+              );
+            }
+
+            if (p.type === "cameo") {
+              const isPendingDelete = pendingDeleteCameo === p.text;
+              if (!cameoRegistered) {
+                const key = `cameo-error-${i}`;
+                return (
+                  <HoverCard
+                    key={key}
+                    open={openKey === key}
+                    onOpenChange={(o) => handleSegmentOpenChange(key, o)}
+                  >
+                    <HoverCardTrigger
+                      delay={200}
+                      closeDelay={100}
+                      render={
+                        <mark
+                          className={[
+                            "bg-destructive/15 text-destructive rounded-sm not-italic cursor-default pointer-events-auto",
+                            isPendingDelete
+                              ? "ring-2 ring-offset-1 ring-offset-card ring-destructive/60"
+                              : "",
+                          ].join(" ")}
+                        />
+                      }
+                    >
+                      {p.text}
+                    </HoverCardTrigger>
+                    <HoverCardContent className="w-52" side="top" align="start">
+                      <p className="text-xs text-muted-foreground">
+                        Register your <strong className="text-foreground">Cameo</strong> first to use{" "}
+                        <span className="font-mono text-foreground">{p.text}</span> in prompts.
+                      </p>
+                    </HoverCardContent>
+                  </HoverCard>
+                );
+              }
+              return (
+                <mark
+                  key={`cameo-${i}`}
+                  className={[
+                    "bg-channel text-channel-foreground rounded-sm not-italic pointer-events-auto",
+                    isPendingDelete
+                      ? "ring-2 ring-offset-1 ring-offset-card ring-destructive/60"
+                      : "",
+                  ].join(" ")}
+                >
+                  {p.text}
+                </mark>
               );
             }
 

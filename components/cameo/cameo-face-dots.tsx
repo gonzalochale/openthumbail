@@ -29,10 +29,14 @@ export function CameoFaceDots({ captured, current }: CameoFaceDotsProps) {
                 isDone
                   ? { scale: 1, opacity: 1 }
                   : isActive
-                    ? { scale: 1, opacity: 1 }
+                    ? { scale: [0.95, 1.1, 0.95], opacity: [0.8, 1, 0.8] }
                     : { scale: 0.8, opacity: 0.4 }
               }
-              transition={{ type: "spring", stiffness: 400, damping: 20 }}
+              transition={
+                isActive && !isDone
+                  ? { duration: 1, repeat: Infinity, ease: "easeInOut" }
+                  : { type: "spring", stiffness: 400, damping: 20 }
+              }
               className={[
                 "w-3 h-3 rounded-full border-2 transition-colors",
                 isDone

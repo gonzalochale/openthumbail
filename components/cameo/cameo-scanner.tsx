@@ -1,7 +1,13 @@
 "use client";
 
 import { useEffect, useRef, useState, useCallback } from "react";
-import { animate, useMotionValue, useReducedMotion } from "motion/react";
+import {
+  m,
+  animate,
+  useMotionValue,
+  useReducedMotion,
+  AnimatePresence,
+} from "motion/react";
 import type { MotionValue } from "motion/react";
 import {
   CAMEO_ANGLES,
@@ -62,12 +68,12 @@ function silentClose(landmarker: { close: () => void }) {
 
 interface CameoScannerProps {
   onComplete: (images: { angle: string; base64: string }[]) => void;
+  isProcessing?: boolean;
 }
 
 const SIZE = 280;
 const VIDEO_R = 108;
 const COMPOSITE_CELL = 256;
-// Layout: front left right / up down (empty)
 const COMPOSITE_LAYOUT: [CameoAngle, number, number][] = [
   ["front", 0, 0],
   ["left", 1, 0],
@@ -76,7 +82,10 @@ const COMPOSITE_LAYOUT: [CameoAngle, number, number][] = [
   ["down", 1, 1],
 ];
 
-export function CameoScanner({ onComplete }: CameoScannerProps) {
+export function CameoScanner({
+  onComplete,
+  isProcessing = false,
+}: CameoScannerProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -89,7 +98,10 @@ export function CameoScanner({ onComplete }: CameoScannerProps) {
 
   const [cameraReady, setCameraReady] = useState(false);
   const [mpReady, setMpReady] = useState(false);
-  const [cameraError, setCameraError] = useState<string | null>(null);
+  const [cameraError, setCameraError] = useState<
+    "permission" | "notfound" | "generic" | null
+  >(null);
+  const [retryCount, setRetryCount] = useState(0);
   const [captured, setCaptured] = useState<Map<CameoAngle, string>>(new Map());
   const [faceDetected, setFaceDetected] = useState(false);
 
@@ -111,6 +123,8 @@ export function CameoScanner({ onComplete }: CameoScannerProps) {
 
   useEffect(() => {
     let cancelled = false;
+    setCameraError(null);
+    setCameraReady(false);
     navigator.mediaDevices
       .getUserMedia({ video: { facingMode: "user", width: 640, height: 480 } })
       .then((stream) => {
@@ -129,24 +143,33 @@ export function CameoScanner({ onComplete }: CameoScannerProps) {
             })
             .catch((err) => {
               if (!cancelled && err?.name !== "AbortError")
-                setCameraError("Could not start camera.");
+                setCameraError("generic");
             });
         }
       })
       .catch((err) => {
-        if (!cancelled)
-          setCameraError(
-            err?.name === "NotAllowedError"
-              ? "Camera access denied. Please allow camera access and try again."
-              : "Could not open camera.",
-          );
+        if (!cancelled) {
+          if (
+            err?.name === "NotAllowedError" ||
+            err?.name === "PermissionDeniedError"
+          ) {
+            setCameraError("permission");
+          } else if (
+            err?.name === "NotFoundError" ||
+            err?.name === "DevicesNotFoundError"
+          ) {
+            setCameraError("notfound");
+          } else {
+            setCameraError("generic");
+          }
+        }
       });
     return () => {
       cancelled = true;
       streamRef.current?.getTracks().forEach((t) => t.stop());
       streamRef.current = null;
     };
-  }, []);
+  }, [retryCount]);
 
   useEffect(() => {
     let cancelled = false;
@@ -235,6 +258,8 @@ export function CameoScanner({ onComplete }: CameoScannerProps) {
         for (const angle of CAMEO_ANGLES) {
           if (capturedRef.current.has(angle)) continue;
 
+          if (angle !== "front" && !capturedRef.current.has("front")) continue;
+
           if (checkAlignment(pose, angle)) {
             if (holdStartRef.current[angle] === undefined) {
               holdStartRef.current[angle] = Date.now();
@@ -309,19 +334,76 @@ export function CameoScanner({ onComplete }: CameoScannerProps) {
     });
   }, [captured, onComplete]);
 
+  useEffect(() => {
+    if (!isProcessing) return;
+    streamRef.current?.getTracks().forEach((t) => t.stop());
+    streamRef.current = null;
+  }, [isProcessing]);
+
   const rm = useReducedMotion();
   const ready = cameraReady && mpReady && !cameraError;
+
+  const frontDone = captured.has("front");
+  const remaining = CAMEO_ANGLES.filter(
+    (a) => a !== "front" && !captured.has(a),
+  );
+
+  let hint: string;
+  if (isProcessing) {
+    hint = "Working on it…";
+  } else if (cameraError) {
+    hint = "";
+  } else if (!ready) {
+    hint = "Starting camera…";
+  } else if (!faceDetected) {
+    hint = "Position your face in the frame";
+  } else if (!frontDone) {
+    hint = "Look straight at the camera";
+  } else if (remaining.length === 4) {
+    hint = "Now slowly turn your head in each direction";
+  } else if (remaining.length > 0) {
+    const labels: Record<string, string> = {
+      left: "left",
+      right: "right",
+      up: "up",
+      down: "down",
+    };
+    hint = `Keep going — ${remaining.map((a) => labels[a]).join(", ")}`;
+  } else {
+    hint = "";
+  }
+
+  const errorMessages: Record<
+    NonNullable<typeof cameraError>,
+    { title: string; detail: string }
+  > = {
+    permission: {
+      title: "Camera access denied",
+      detail: "Allow camera access in your browser settings, then try again.",
+    },
+    notfound: {
+      title: "No camera found",
+      detail: "Connect a camera and try again.",
+    },
+    generic: {
+      title: "Could not start camera",
+      detail: "Something went wrong starting your camera.",
+    },
+  };
 
   return (
     <div className="flex flex-col items-center gap-3">
       <div className="relative" style={{ width: SIZE, height: SIZE }}>
-        <div
+        <m.div
           className="absolute overflow-hidden"
           style={{
             inset: SIZE / 2 - VIDEO_R,
             borderRadius: "50%",
             backgroundColor: "black",
           }}
+          initial={rm ? false : { opacity: 0 }}
+          animate={{ opacity: cameraError ? 0.3 : 1 }}
+          transition={{ duration: 0.4, ease: [0.25, 1, 0.5, 1] }}
         >
           <video
             ref={videoRef}
@@ -330,23 +412,95 @@ export function CameoScanner({ onComplete }: CameoScannerProps) {
             className="w-full h-full object-cover"
             style={{ transform: "scaleX(-1)" }}
           />
-        </div>
-
-        {cameraError && (
-          <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-            <p className="text-muted-foreground text-xs text-center px-8">
-              {cameraError}
-            </p>
-          </div>
+          <AnimatePresence>
+            {isProcessing && (
+              <m.div
+                key="skeleton"
+                className="absolute inset-0"
+                style={{ background: "var(--channel)" }}
+                initial={{ opacity: 0 }}
+                animate={rm ? { opacity: 0.5 } : { opacity: [0.3, 0.65, 0.3] }}
+                exit={{ opacity: 0 }}
+                transition={
+                  rm
+                    ? { duration: 0.4, ease: [0.25, 1, 0.5, 1] }
+                    : { duration: 1.6, repeat: Infinity, ease: "easeInOut" }
+                }
+              />
+            )}
+          </AnimatePresence>
+        </m.div>
+        <AnimatePresence>
+          {!ready && !cameraError && (
+            <m.div
+              key="loading"
+              className="absolute inset-0 flex items-center justify-center pointer-events-none"
+              initial={rm ? false : { opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={
+                rm ? undefined : { opacity: 0, transition: { duration: 0.3 } }
+              }
+              transition={{ duration: 0.2 }}
+            >
+              <m.div
+                className="rounded-full border border-foreground/20"
+                style={{ width: VIDEO_R * 2, height: VIDEO_R * 2 }}
+                animate={rm ? {} : { opacity: [0.2, 0.5, 0.2] }}
+                transition={{
+                  duration: 1.8,
+                  repeat: Infinity,
+                  ease: "easeInOut",
+                }}
+              />
+            </m.div>
+          )}
+        </AnimatePresence>
+        {!cameraError && (
+          <CameoScannerOverlay
+            capturedAngles={new Set(captured.keys())}
+            holdProgressMap={holdProgressRef.current}
+            faceDetected={faceDetected}
+          />
         )}
-
-        <CameoScannerOverlay
-          capturedAngles={new Set(captured.keys())}
-          holdProgressMap={holdProgressRef.current}
-        />
 
         <canvas ref={canvasRef} className="hidden" />
       </div>
+      <AnimatePresence mode="wait">
+        {cameraError ? (
+          <m.div
+            key="camera-error"
+            initial={rm ? { opacity: 0 } : { opacity: 0, y: 4 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.2, ease: [0.25, 1, 0.5, 1] }}
+            className="flex flex-col items-center gap-2 text-center"
+          >
+            <p className="text-xs font-medium text-foreground">
+              {errorMessages[cameraError].title}
+            </p>
+            <p className="text-xs text-muted-foreground px-4">
+              {errorMessages[cameraError].detail}
+            </p>
+            <button
+              onClick={() => setRetryCount((n) => n + 1)}
+              className="text-xs text-foreground underline underline-offset-3 hover:text-muted-foreground transition-colors"
+            >
+              Try again
+            </button>
+          </m.div>
+        ) : hint ? (
+          <m.p
+            key={hint}
+            initial={rm ? { opacity: 0 } : { opacity: 0, y: 4 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={rm ? { opacity: 0 } : { opacity: 0, y: -4 }}
+            transition={{ duration: 0.2, ease: [0.25, 1, 0.5, 1] }}
+            className="text-xs text-muted-foreground text-center"
+          >
+            {hint}
+          </m.p>
+        ) : null}
+      </AnimatePresence>
     </div>
   );
 }

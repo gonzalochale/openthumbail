@@ -37,6 +37,10 @@ export function CameoManage({ onClose }: CameoManageProps) {
 
   return (
     <div className="flex flex-col gap-3">
+      <p className="text-xs text-muted-foreground">
+        Use <span className="font-mono text-foreground">#me</span> in any prompt
+        to appear in the scene.
+      </p>
       <AnimatePresence>
         {deleteError && (
           <m.p
@@ -50,17 +54,17 @@ export function CameoManage({ onClose }: CameoManageProps) {
           </m.p>
         )}
       </AnimatePresence>
-      <m.div className="w-full flex gap-2 pt-1 justify-end">
+      <div className="w-full flex gap-2 justify-end">
         <m.button
           onClick={handleDelete}
           disabled={deleting}
           transition={SPRING_BTN}
-          className={cn(buttonVariants({ variant: "outline" }), "")}
+          className={cn(buttonVariants({ variant: "outline" }))}
         >
           <Trash2 size={14} />
-          Delete Cameo
+          Remove
         </m.button>
-      </m.div>
+      </div>
     </div>
   );
 }

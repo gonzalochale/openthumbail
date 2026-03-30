@@ -1,7 +1,8 @@
 "use client";
 
+import { cn } from "@/lib/utils";
 import { m, AnimatePresence, useReducedMotion } from "motion/react";
-import { CheckCircle } from "lucide-react";
+import { buttonVariants } from "../ui/button";
 
 interface CameoCompleteProps {
   uploading: boolean;
@@ -74,39 +75,12 @@ export function CameoComplete({
               onClick={onDone}
               whileTap={rm ? undefined : { scale: 0.97 }}
               transition={SPRING_BTN}
-              className="px-4 py-2 rounded-lg bg-secondary text-secondary-foreground text-sm font-medium hover:bg-secondary/80 transition-colors"
+              className={cn(buttonVariants({ variant: "outline" }))}
             >
               Try again
             </m.button>
           </m.div>
-        ) : (
-          <m.div key="success" className="flex flex-col items-center gap-3">
-            <m.div
-              initial={rm ? (false as const) : { scale: 0.5, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              transition={{ type: "spring", duration: 0.45, bounce: 0.15 }}
-            >
-              <CheckCircle className="w-10 h-10 text-green-500" />
-            </m.div>
-            <m.p
-              initial={rm ? (false as const) : { opacity: 0, y: 4 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.2, delay: 0.1, ease: EASE_OUT }}
-              className="text-sm font-medium"
-            >
-              Cameo ready
-            </m.p>
-            <m.p
-              initial={rm ? (false as const) : { opacity: 0, y: 4 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.2, delay: 0.15, ease: EASE_OUT }}
-              className="text-xs text-muted-foreground text-center px-4"
-            >
-              Type <span className="font-mono text-foreground">#me</span> in any
-              prompt to appear in your thumbnails
-            </m.p>
-          </m.div>
-        )}
+        ) : null}
       </AnimatePresence>
     </div>
   );

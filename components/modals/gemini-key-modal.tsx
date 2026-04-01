@@ -66,11 +66,19 @@ export function GeminiKeyModal({ open, onOpenChange }: GeminiKeyModalProps) {
               animate="animate"
               exit="exit"
               transition={transition}
-              className="flex items-center gap-2 rounded-md border border-border bg-muted/40 px-3 py-2"
+              className="flex min-w-0 items-center gap-2 rounded-md border border-border bg-muted/40 px-3 py-2"
             >
-              <span className="font-mono text-xs text-muted-foreground flex-1 tracking-widest truncate">
-                {maskedSavedKey}
-              </span>
+              <div
+                className="min-w-0 flex-1 overflow-hidden"
+                style={{
+                  maskImage:
+                    "linear-gradient(to right, black 70%, transparent 100%)",
+                }}
+              >
+                <span className="block whitespace-nowrap font-mono text-xs tracking-widest text-muted-foreground">
+                  {maskedSavedKey}
+                </span>
+              </div>
             </m.div>
           ) : (
             <m.div
@@ -80,7 +88,7 @@ export function GeminiKeyModal({ open, onOpenChange }: GeminiKeyModalProps) {
               animate="animate"
               exit="exit"
               transition={transition}
-              className="flex items-center gap-2"
+              className="flex min-w-0 items-center gap-2"
             >
               <Input
                 id="user-gemini-key"

@@ -2,7 +2,7 @@ import { generateText, Output } from "ai";
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { z } from "zod";
 import { whitePng } from "@/lib/generation/white-png";
-import { deductCredit, refundCredit } from "@/lib/stripe/credits";
+import { deductCredit, getCredits, refundCredit } from "@/lib/stripe/credits";
 import { requireAuth } from "@/lib/auth/require-auth";
 import {
   CREATE_IMAGES,
@@ -165,21 +165,31 @@ export async function POST(req: Request) {
 
   let deducted = false;
   let apiKeyToUse: string | null = null;
+  let creditSource: "server_credits" | "user_api_key" = "server_credits";
 
   if (envApiKey) {
     deducted = await deductCredit(session.user.id);
     if (deducted) {
       apiKeyToUse = envApiKey;
+      creditSource = "server_credits";
     } else if (fallbackUserApiKey) {
       apiKeyToUse = fallbackUserApiKey;
+      creditSource = "user_api_key";
     } else {
+      const remainingCredits = await getCredits(session.user.id);
       return Response.json(
-        { error: "Insufficient credits", code: "NO_CREDITS" },
+        {
+          error: "Insufficient credits",
+          code: "NO_CREDITS",
+          remainingCredits,
+          creditSource: "server_credits",
+        },
         { status: 402 },
       );
     }
   } else if (fallbackUserApiKey) {
     apiKeyToUse = fallbackUserApiKey;
+    creditSource = "user_api_key";
   } else {
     return Response.json({ error: "Error generating image" }, { status: 500 });
   }
@@ -242,11 +252,14 @@ export async function POST(req: Request) {
           videoRefs,
         });
       }
+      const remainingCredits = await getCredits(session.user.id);
       return Response.json({
         mimeType: "image/png",
         enhancedPrompt: prompt,
         generationId,
         cameoUsed: shouldUseCameo,
+        remainingCredits,
+        creditSource,
       });
     }
 
@@ -266,10 +279,13 @@ export async function POST(req: Request) {
 
     if (output.blocked) {
       await maybeRefundCredit();
+      const remainingCredits = await getCredits(session.user.id);
       return Response.json(
         {
           error:
             output.reason ?? "Generated content violates safety guidelines",
+          remainingCredits,
+          creditSource,
         },
         { status: 422 },
       );
@@ -278,8 +294,9 @@ export async function POST(req: Request) {
     const safePrompt = output.prompt;
     if (!safePrompt) {
       await maybeRefundCredit();
+      const remainingCredits = await getCredits(session.user.id);
       return Response.json(
-        { error: "Failed to validate prompt" },
+        { error: "Failed to validate prompt", remainingCredits, creditSource },
         { status: 500 },
       );
     }
@@ -335,16 +352,24 @@ export async function POST(req: Request) {
       });
     }
 
+    const remainingCredits = await getCredits(session.user.id);
+
     return Response.json({
       mimeType: "image/png",
       enhancedPrompt: safePrompt,
       generationId,
       cameoUsed: shouldUseCameo,
+      remainingCredits,
+      creditSource,
     });
   } catch (err) {
     await maybeRefundCredit();
+    const remainingCredits = await getCredits(session.user.id);
     const message =
       err instanceof Error ? err.message : "Image generation failed";
-    return Response.json({ error: message }, { status: 500 });
+    return Response.json(
+      { error: message, remainingCredits, creditSource },
+      { status: 500 },
+    );
   }
 }

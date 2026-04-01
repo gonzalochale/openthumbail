@@ -72,26 +72,28 @@ export function GeneratePrompt() {
     versions,
     selectedVersionId,
     sessionId,
+    credits,
     loading,
     setLoading,
+    setCredits,
     startGenerating,
     addVersion,
     setSessionId,
     selectVersion,
-    decrementCredits,
     clearTick,
   } = useThumbnailStore(
     useShallow((s) => ({
       versions: s.versions,
       selectedVersionId: s.selectedVersionId,
       sessionId: s.sessionId,
+      credits: s.credits,
       loading: s.loading,
       setLoading: s.setLoading,
+      setCredits: s.setCredits,
       startGenerating: s.startGenerating,
       addVersion: s.addVersion,
       setSessionId: s.setSessionId,
       selectVersion: s.selectVersion,
-      decrementCredits: s.decrementCredits,
       clearTick: s.clearTick,
     })),
   );
@@ -134,6 +136,7 @@ export function GeneratePrompt() {
     });
   const isStartingImageDisabled =
     loading || cameoLoading || selectedVersionId !== null;
+  const hasUserGeminiApiKey = !!userGeminiApiKey.trim();
 
   useEffect(() => {
     if (clearTick === 0) return;
@@ -252,6 +255,11 @@ export function GeneratePrompt() {
           handle: w.ref.handle,
         }));
 
+      if (credits !== null && credits < 1 && !hasUserGeminiApiKey) {
+        openCreditsModal();
+        return;
+      }
+
       lastSubmittedPromptRef.current = sendPrompt;
       startGenerating();
 
@@ -283,7 +291,7 @@ export function GeneratePrompt() {
           body: JSON.stringify({
             prompt: sendPrompt,
             generationPrompt,
-            userApiKey: userGeminiApiKey || undefined,
+            userApiKey: hasUserGeminiApiKey ? userGeminiApiKey : undefined,
             uploadedImage,
             channelRefs: channelRefs.length > 0 ? channelRefs : undefined,
             videoRefs: videoRefs.length > 0 ? videoRefs : undefined,
@@ -293,6 +301,11 @@ export function GeneratePrompt() {
           }),
         });
         const data = await res.json();
+
+        if (typeof data.remainingCredits === "number") {
+          setCredits(data.remainingCredits);
+        }
+
         if (res.status === 402) {
           if (sessionCreatedHere) {
             fetch(`/api/sessions/${activeSessionId}`, {
@@ -310,7 +323,6 @@ export function GeneratePrompt() {
           return;
         }
 
-        decrementCredits();
         addVersion({
           generationId: data.generationId,
           imageUrl: `/api/images/${data.generationId}`,
@@ -350,15 +362,18 @@ export function GeneratePrompt() {
       versions,
       selectedVersionId,
       sessionId,
+      credits,
       startGenerating,
       addVersion,
       setSessionId,
       setLoading,
-      decrementCredits,
+      setCredits,
       clearAll,
       userGeminiApiKey,
+      hasUserGeminiApiKey,
       cameoActive,
       cameoRegistered,
+      openCreditsModal,
     ],
   );
 

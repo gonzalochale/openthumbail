@@ -27,9 +27,31 @@ export async function deductCredit(userId: string): Promise<boolean> {
 }
 
 export async function refundCredit(userId: string): Promise<void> {
-  await pool.query(`UPDATE "user" SET credits = credits + 1 WHERE id = $1`, [
-    userId,
-  ]);
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query(`SELECT credits FROM "user" WHERE id = $1 FOR UPDATE`, [
+      userId,
+    ]);
+    await client.query(
+      `UPDATE "user" SET credits = credits + 1 WHERE id = $1`,
+      [userId],
+    );
+    await client.query("COMMIT");
+  } catch (err) {
+    await client.query("ROLLBACK");
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+export async function getCredits(userId: string): Promise<number> {
+  const result = await pool.query<{ credits: number }>(
+    `SELECT credits FROM "user" WHERE id = $1`,
+    [userId],
+  );
+  return result.rows[0]?.credits ?? 0;
 }
 
 export async function grantKonamiCredits(

@@ -53,7 +53,8 @@ export function GeminiKeyModal({ open, onOpenChange }: GeminiKeyModalProps) {
         <DialogHeader>
           <DialogTitle>Gemini API key</DialogTitle>
           <DialogDescription>
-            Your key is stored only in this browser via localStorage.
+            Your key is stored only in this browser via localStorage. If your
+            credits are 0, we automatically use this key.
           </DialogDescription>
         </DialogHeader>
         <AnimatePresence mode="wait">

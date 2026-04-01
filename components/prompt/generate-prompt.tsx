@@ -253,10 +253,6 @@ export function GeneratePrompt() {
         }));
 
       lastSubmittedPromptRef.current = sendPrompt;
-      setPrompt("");
-      setFileEntries([]);
-      clearAll();
-      entriesToSubmit.forEach((e) => URL.revokeObjectURL(e.url));
       startGenerating();
 
       let activeSessionId = versions.length > 0 ? sessionId : null;
@@ -326,6 +322,11 @@ export function GeneratePrompt() {
         });
         generationSaved = true;
 
+        setPrompt("");
+        setFileEntries([]);
+        clearAll();
+        entriesToSubmit.forEach((e) => URL.revokeObjectURL(e.url));
+
         if (sessionCreatedHere) {
           router.push(`/${activeSessionId}`);
         }
@@ -336,7 +337,6 @@ export function GeneratePrompt() {
           }).catch(() => {});
         }
         toast(err instanceof Error ? err.message : "Something went wrong");
-        setPrompt(sendPrompt);
         setLoading(false);
       } finally {
         requestAnimationFrame(() => textareaRef.current?.focus());

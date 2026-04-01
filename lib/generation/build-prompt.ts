@@ -205,10 +205,19 @@ export function buildImagePrompt({
     const prevLine = isUploadedStartingImage
       ? `Image 1: Starting image provided by the user. Use its content as the primary subject. If it contains people, reproduce their faces, appearance, and clothing EXACTLY as shown — do not alter, idealize, or replace them with generic faces. If it contains objects, scenery, or animals, preserve them faithfully as the main visual elements. Compose a professional YouTube thumbnail around this content.`
       : `Image 1: Previously generated thumbnail — use as the base for editing.`;
+    const cameoEditGuard =
+      hasCameo && !isUploadedStartingImage
+        ? `Cameo identity lock: preserve the same person identity as the cameo reference(s) and Image 1. Keep facial structure, skin tone, hairline, eye shape, and overall likeness consistent across the edit.`
+        : null;
     const postamble = isUploadedStartingImage
       ? `The result should look like a professional YouTube thumbnail: bold composition, high contrast, strong visual hierarchy, and immediately eye-catching. The content of Image 1 is the main subject — reproduce it faithfully. If it contains people, their faces and appearance must be identical to Image 1. If it contains objects or scenery, preserve them accurately. ${NO_TEXT_RULE}`
       : `Apply the user's edit precisely. Remove only what is explicitly mentioned. Add only what is explicitly requested. Keep all other elements from Image 1 exactly as they appear: composition, lighting, people, colors, and background. ${NO_TEXT_RULE}`;
-    const guide = [prevLine, ...globalGuideLines, ...imageGuide].join("\n");
+    const guide = [
+      prevLine,
+      ...globalGuideLines,
+      ...imageGuide,
+      ...(cameoEditGuard ? [cameoEditGuard] : []),
+    ].join("\n");
     imagePromptText = isUploadedStartingImage
       ? `${guide}\n\nInstruction: ${imagePromptText}\n\n${postamble}`
       : `${guide}\n\nUser's edit request: ${userPrompt ?? imagePromptText}\nTarget state: ${imagePromptText}\n\n${postamble}`;

@@ -30,7 +30,9 @@ export default async function SessionPage({
   }
 
   const result = await pool.query(
-    `SELECT id, prompt, enhanced_prompt, mime_type, created_at
+    `SELECT id, prompt, enhanced_prompt, mime_type,
+            cameo_used,
+            created_at
      FROM thumbnail_generation
      WHERE session_id = $1
      ORDER BY created_at ASC`,
@@ -43,6 +45,8 @@ export default async function SessionPage({
     enhancedPrompt: row.enhanced_prompt as string | null,
     imageUrl: imageProxyUrl(row.id as string),
     mimeType: (row.mime_type as string | null) ?? "image/png",
+    cameoUsed:
+      Boolean(row.cameo_used) || /#(me|cameo)\b/i.test(row.prompt as string),
     createdAt: new Date(row.created_at as string).getTime(),
   }));
 

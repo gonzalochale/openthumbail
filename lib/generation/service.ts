@@ -10,6 +10,7 @@ export async function persistGeneration(params: PersistGenerationParams) {
     prompt,
     enhancedPrompt,
     base64,
+    cameoUsed,
     previousGenerationId,
     channelRefs,
     videoRefs,
@@ -23,9 +24,9 @@ export async function persistGeneration(params: PersistGenerationParams) {
     pool.query(
       `INSERT INTO thumbnail_generation
         (id, session_id, user_id, prompt, enhanced_prompt, image_key, mime_type,
-          previous_generation_id, channel_refs, video_refs,
+          cameo_used, previous_generation_id, channel_refs, video_refs,
          text_thought_signature, image_thought_signature)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
       [
         generationId,
         sessionId,
@@ -34,6 +35,7 @@ export async function persistGeneration(params: PersistGenerationParams) {
         enhancedPrompt,
         key,
         "image/png",
+        cameoUsed ?? false,
         previousGenerationId ?? null,
         channelRefs ? JSON.stringify(channelRefs) : null,
         videoRefs ? JSON.stringify(videoRefs) : null,
@@ -51,10 +53,13 @@ export async function fetchPreviousVersion(
   const result = await pool.query<{
     image_key: string;
     enhanced_prompt: string | null;
+    prompt: string;
+    cameo_used: boolean;
     text_thought_signature: string | null;
     image_thought_signature: string | null;
   }>(
-    `SELECT image_key, enhanced_prompt, text_thought_signature, image_thought_signature
+    `SELECT image_key, enhanced_prompt, prompt, cameo_used,
+            text_thought_signature, image_thought_signature
      FROM thumbnail_generation WHERE id = $1 AND user_id = $2`,
     [previousGenerationId, userId],
   );
@@ -66,6 +71,7 @@ export async function fetchPreviousVersion(
     imageBase64: await getObjectBase64(row.image_key),
     mimeType: "image/png",
     enhancedPrompt: row.enhanced_prompt,
+    cameoUsed: row.cameo_used || /#(me|cameo)\b/i.test(row.prompt),
     textThoughtSignature: row.text_thought_signature,
     imageThoughtSignature: row.image_thought_signature,
   };

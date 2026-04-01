@@ -8,6 +8,7 @@ export interface ThumbnailVersion {
   mimeType: string;
   prompt: string;
   enhancedPrompt: string | null;
+  cameoUsed?: boolean;
   createdAt: number;
 }
 

@@ -25,12 +25,14 @@ export async function GET(
     prompt: string;
     enhanced_prompt: string | null;
     mime_type: string;
+    cameo_used: boolean;
     previous_generation_id: string | null;
     channel_refs: unknown;
     video_refs: unknown;
     created_at: string;
   }>(
     `SELECT id, prompt, enhanced_prompt, mime_type,
+            cameo_used,
             previous_generation_id, channel_refs, video_refs, created_at
      FROM thumbnail_generation
      WHERE session_id = $1
@@ -44,6 +46,7 @@ export async function GET(
     enhancedPrompt: row.enhanced_prompt,
     imageUrl: imageProxyUrl(row.id),
     mimeType: row.mime_type,
+    cameoUsed: row.cameo_used || /#(me|cameo)\b/i.test(row.prompt),
     previousGenerationId: row.previous_generation_id,
     channelRefs: row.channel_refs,
     videoRefs: row.video_refs,

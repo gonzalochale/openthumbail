@@ -215,7 +215,9 @@ export function GeneratePrompt() {
       );
       if (!validationPrompt) return;
 
-      const isCameo = cameoActive && cameoRegistered;
+      const selectedVersion = versions.find((v) => v.id === selectedVersionId);
+      const isCameo =
+        (cameoActive && cameoRegistered) || Boolean(selectedVersion?.cameoUsed);
       const generationPrompt = trimmed
         .replace(youtubeRe(), "")
         .replace(/\s{2,}/g, " ")
@@ -257,7 +259,6 @@ export function GeneratePrompt() {
       entriesToSubmit.forEach((e) => URL.revokeObjectURL(e.url));
       startGenerating();
 
-      const selectedVersion = versions.find((v) => v.id === selectedVersionId);
       let activeSessionId = versions.length > 0 ? sessionId : null;
       const sessionCreatedHere = !activeSessionId;
       let generationSaved = false;
@@ -320,6 +321,7 @@ export function GeneratePrompt() {
           mimeType: data.mimeType,
           enhancedPrompt: data.enhancedPrompt ?? null,
           prompt: sendPrompt,
+          cameoUsed: data.cameoUsed ?? isCameo,
           createdAt: Date.now(),
         });
         generationSaved = true;

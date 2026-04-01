@@ -17,6 +17,7 @@ export interface PreviousVersion {
   imageBase64: string;
   mimeType: string;
   enhancedPrompt: string | null;
+  cameoUsed?: boolean;
   textThoughtSignature?: string | null;
   imageThoughtSignature?: string | null;
 }
@@ -28,6 +29,7 @@ export interface PersistGenerationParams {
   prompt: string;
   enhancedPrompt: string;
   base64: string;
+  cameoUsed?: boolean;
   previousGenerationId?: string;
   channelRefs?: ChannelRef[];
   videoRefs?: VideoRef[];

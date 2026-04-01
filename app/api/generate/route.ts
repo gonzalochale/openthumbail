@@ -65,22 +65,57 @@ const safetySchema = z.object({
 async function resolveCameoUsage({
   prompt,
   isCameo,
+  previousVersion,
   userId,
 }: {
   prompt: string;
   isCameo?: boolean;
+  previousVersion?: PreviousVersion;
   userId: string;
 }) {
-  const explicitCameoRequested =
-    Boolean(isCameo) || /#(me|cameo)\b/i.test(prompt);
-  const cameoImages = explicitCameoRequested
-    ? await getCameoImages(userId)
-    : undefined;
+  const shouldAttemptCameo =
+    Boolean(isCameo) ||
+    /#(me|cameo)\b/i.test(prompt) ||
+    Boolean(previousVersion?.cameoUsed);
+  const cameoImages = shouldAttemptCameo ? await getCameoImages(userId) : null;
 
   return {
     cameoImages,
     shouldUseCameo: (cameoImages?.length ?? 0) > 0,
   };
+}
+
+function buildEnrichmentInput({
+  promptForGeneration,
+  shouldUseCameo,
+  previousVersion,
+  uploadedImage,
+}: {
+  promptForGeneration: string;
+  shouldUseCameo: boolean;
+  previousVersion?: PreviousVersion;
+  uploadedImage?: { imageBase64: string; mimeType: string };
+}) {
+  const hasPrevious = Boolean(previousVersion?.enhancedPrompt);
+  const hasStartingImage = Boolean(uploadedImage);
+
+  if (shouldUseCameo) {
+    if (hasPrevious) {
+      return `[Cameo mode]\n[Previous thumbnail: "${previousVersion!.enhancedPrompt}"]\nEdit: ${promptForGeneration}`;
+    }
+    if (hasStartingImage) {
+      return `[Cameo mode]\n[Starting image: user provided a photo — the people in it are the main subjects]\nPrompt: ${promptForGeneration}`;
+    }
+    return `[Cameo mode]\nPrompt: ${promptForGeneration}`;
+  }
+
+  if (hasPrevious) {
+    return `[Previous thumbnail: "${previousVersion!.enhancedPrompt}"]\nEdit: ${promptForGeneration}`;
+  }
+  if (hasStartingImage) {
+    return `[Starting image: user provided a photo — the people in it are the main subjects]\nPrompt: ${promptForGeneration}`;
+  }
+  return promptForGeneration;
 }
 
 export async function POST(req: Request) {
@@ -157,12 +192,6 @@ export async function POST(req: Request) {
   try {
     const google = createGoogleGenerativeAI({ apiKey: apiKeyToUse });
 
-    const { cameoImages, shouldUseCameo } = await resolveCameoUsage({
-      prompt,
-      isCameo,
-      userId: session.user.id,
-    });
-
     const [[channelImageGroups, videoImageGroups], previousVersion] =
       await Promise.all([
         Promise.all([
@@ -180,6 +209,13 @@ export async function POST(req: Request) {
                 : undefined,
             ),
       ]);
+
+    const { cameoImages, shouldUseCameo } = await resolveCameoUsage({
+      prompt,
+      isCameo,
+      previousVersion,
+      userId: session.user.id,
+    });
 
     const reservedSlots = (previousVersion ? 1 : 0) + (shouldUseCameo ? 1 : 0);
     const maxRefImages = MAX_TOTAL_IMAGES - reservedSlots;
@@ -200,6 +236,7 @@ export async function POST(req: Request) {
           prompt,
           enhancedPrompt: prompt,
           base64: whitePng(2560, 1440),
+          cameoUsed: shouldUseCameo,
           previousGenerationId,
           channelRefs,
           videoRefs,
@@ -209,16 +246,16 @@ export async function POST(req: Request) {
         mimeType: "image/png",
         enhancedPrompt: prompt,
         generationId,
+        cameoUsed: shouldUseCameo,
       });
     }
 
-    const enrichmentInput = previousVersion?.enhancedPrompt
-      ? `[Previous thumbnail: "${previousVersion.enhancedPrompt}"]\nEdit: ${promptForGeneration}`
-      : uploadedImage
-        ? `[Starting image: user provided a photo — the people in it are the main subjects]\nPrompt: ${promptForGeneration}`
-        : shouldUseCameo
-          ? `[Cameo mode]\nPrompt: ${promptForGeneration}`
-          : promptForGeneration;
+    const enrichmentInput = buildEnrichmentInput({
+      promptForGeneration,
+      shouldUseCameo,
+      previousVersion,
+      uploadedImage,
+    });
 
     const { output } = await generateText({
       model: google(SAFETY_MODEL),
@@ -289,6 +326,7 @@ export async function POST(req: Request) {
         prompt,
         enhancedPrompt: safePrompt,
         base64: imageBase64,
+        cameoUsed: shouldUseCameo,
         previousGenerationId,
         channelRefs,
         videoRefs,
@@ -301,6 +339,7 @@ export async function POST(req: Request) {
       mimeType: "image/png",
       enhancedPrompt: safePrompt,
       generationId,
+      cameoUsed: shouldUseCameo,
     });
   } catch (err) {
     await maybeRefundCredit();

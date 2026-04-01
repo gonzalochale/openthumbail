@@ -76,6 +76,10 @@ Step 1 — Safety check. Reject (blocked: true) if the user's idea contains or i
 Step 2 — Prompt enrichment (only if safe). Rewrite the user's prompt into a vivid, specific YouTube thumbnail description for image generation:
 - Default to PHOTOREALISTIC unless the user explicitly requests a cartoon, illustration, or specific art style
 - Expand vague ideas into concrete visual direction: describe the scene, lighting, composition, colors, and mood
+- Design the image as a tiny billboard that must be understandable in under 0.5 seconds on mobile
+- Prioritize one dominant subject and avoid clutter; keep the scene to 2-3 major visual elements unless the user explicitly asks otherwise
+- Ensure immediate subject-background separation using contrast, depth, and lighting hierarchy
+- Make the emotional angle obvious (surprise, urgency, curiosity, relief, joy, fear, etc.) and tied to the user's topic
 - When the prompt contains @channelHandle mentions, preserve them verbatim in the enriched output — they refer to the channel's visual style (color palette, layout, energy) NOT to the actual creator; do NOT suggest including the creator's face or likeness in the output
 - When the prompt references a video title, incorporate thematic or visual elements relevant to that video's topic
 - Do NOT include text overlays, words, letters, or typography in the enriched visual description unless the user explicitly asks for text (e.g. "add text saying...", "overlay the title", "write the word..."). The video title is for thematic context only — it is NOT text to render in the image.
@@ -83,29 +87,19 @@ Step 2 — Prompt enrichment (only if safe). Rewrite the user's prompt into a vi
 - Do NOT add people, faces, or human subjects to the enriched description unless the user explicitly asks for them (e.g. "show a person", "include a man", "add a face"). If the user's prompt is about an object, topic, or concept, describe that — no people.
 - If the input starts with [Starting image: ...], you are in STARTING IMAGE MODE. The user provided a photo as the main subject. If that photo contains people, they are the subjects — your enriched description must direct the model to use their real faces and appearance exactly as provided, not generate new ones. Describe the scene, mood, and composition around the content of that photo.
 - If the input starts with [Cameo mode], you are in CAMEO MODE. The user wants to appear in the thumbnail using their pre-registered face references (provided as reference images). Your enriched description must include a human subject and direct the model to use the face from the Cameo reference images. Describe the scene, pose, costume, and composition as requested.
-- If the input starts with [Previous thumbnail: "..."], you are in EDIT MODE. The bracketed description is what was previously generated. The text after "Edit:" is the user's change instruction. Produce an enriched description of the FINAL RESULT after applying that change — preserving everything from the previous thumbnail that is not explicitly modified.
+- If the input starts with [Previous thumbnail: "..."], you are in EDIT MODE. The bracketed description is what was previously generated. The text after "Edit:" is the user's change instruction. Produce an enriched description of the FINAL RESULT after applying that change — preserving everything from the previous thumbnail that is not explicitly modified (subject identity, pose, framing, lighting, palette, background, wardrobe, objects).
 - Keep the enriched prompt concise (under 400 characters)
 - Return it in the prompt field`;
-export const CAMEO_INTENT_SYSTEM_PROMPT = `
-You are a strict intent classifier for a YouTube thumbnail generator.
-
-Goal:
-- Return useCameo=true ONLY when the user clearly wants their OWN face/identity in the thumbnail.
-- Return useCameo=false otherwise.
-
-useCameo=true examples:
-- "use my face"
-- "i want to appear in the thumbnail"
-- "quiero salir yo"
-- "poneme a mi en la miniatura"
-
-useCameo=false examples:
-- Generic requests for "a person", "a man", "a woman", "a face"
-- Requests to imitate channel style
-- Any request where self-appearance is unclear or ambiguous
-
-Be conservative: if unsure, return false.
-`;
+export const THUMBNAIL_COMPOSITION_PRIORITIES = `THUMBNAIL PRIORITIES (apply in order):
+1) One dominant subject with immediate readability at small size
+2) Clear emotional hook visible at a glance
+3) High contrast and depth separation between subject and background
+4) Minimal clutter and strong visual hierarchy`;
+export const REFERENCE_APPLICATION_RULES = `REFERENCE APPLICATION RULES:
+- Channel references define packaging grammar: framing rhythm, contrast strategy, color hierarchy, visual loudness
+- Video references define topic and story hook: what is happening, why it matters, and emotional angle
+- If references conflict, prioritize clickability and clarity over stylistic novelty
+- Never copy identities, logos, exact objects, or scenes from references`;
 export const CHANNEL_STYLE_INSTRUCTION = `STYLE REFERENCE ONLY — these thumbnails are provided as aesthetic inspiration. You MUST generate 100% original content.
 
 FORBIDDEN (do NOT include in your output):

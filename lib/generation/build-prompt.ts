@@ -7,6 +7,8 @@ import {
   NO_TEXT_RULE,
   PHOTOREALISM_PREAMBLE,
   REFERENCE_IMAGES_WARNING,
+  REFERENCE_APPLICATION_RULES,
+  THUMBNAIL_COMPOSITION_PRIORITIES,
   VIDEO_STYLE_INSTRUCTION,
 } from "@/lib/constants";
 import type {
@@ -14,7 +16,7 @@ import type {
   PreviousVersion,
   ReferenceImage,
   VideoRef,
-} from "./types";
+} from "@/lib/generation/types";
 
 export type { ChannelRef, PreviousVersion, ReferenceImage, VideoRef };
 
@@ -192,6 +194,12 @@ export function buildImagePrompt({
 
   let imagePromptText = enriched;
 
+  const globalGuideLines = [THUMBNAIL_COMPOSITION_PRIORITIES];
+
+  if (hasReferenceImages) {
+    globalGuideLines.push(REFERENCE_APPLICATION_RULES);
+  }
+
   if (hasPreviousVersion) {
     const isUploadedStartingImage = previousVersion.enhancedPrompt === null;
     const prevLine = isUploadedStartingImage
@@ -200,7 +208,7 @@ export function buildImagePrompt({
     const postamble = isUploadedStartingImage
       ? `The result should look like a professional YouTube thumbnail: bold composition, high contrast, strong visual hierarchy, and immediately eye-catching. The content of Image 1 is the main subject — reproduce it faithfully. If it contains people, their faces and appearance must be identical to Image 1. If it contains objects or scenery, preserve them accurately. ${NO_TEXT_RULE}`
       : `Apply the user's edit precisely. Remove only what is explicitly mentioned. Add only what is explicitly requested. Keep all other elements from Image 1 exactly as they appear: composition, lighting, people, colors, and background. ${NO_TEXT_RULE}`;
-    const guide = [prevLine, ...imageGuide].join("\n");
+    const guide = [prevLine, ...globalGuideLines, ...imageGuide].join("\n");
     imagePromptText = isUploadedStartingImage
       ? `${guide}\n\nInstruction: ${imagePromptText}\n\n${postamble}`
       : `${guide}\n\nUser's edit request: ${userPrompt ?? imagePromptText}\nTarget state: ${imagePromptText}\n\n${postamble}`;
@@ -210,6 +218,7 @@ export function buildImagePrompt({
     imagePromptText =
       `${PHOTOREALISM_PREAMBLE}\n\n` +
       warning +
+      `${globalGuideLines.join("\n")}\n\n` +
       `${imageGuide.join("\n")}\n\n` +
       `Generate a new original YouTube thumbnail.\n\n` +
       `Instruction: ${imagePromptText}\n\n` +
@@ -217,6 +226,7 @@ export function buildImagePrompt({
   } else {
     imagePromptText =
       `${PHOTOREALISM_PREAMBLE}\n\n` +
+      `${globalGuideLines.join("\n")}\n\n` +
       `Instruction: ${imagePromptText}\n\n` +
       DEFAULT_POSTAMBLE;
   }
@@ -233,5 +243,8 @@ export function buildImagePrompt({
     ...(hasReferenceImages ? allReferenceImages : []),
   ];
 
-  return { text: imagePromptText, images: allImages.slice(0, MAX_TOTAL_IMAGES) };
+  return {
+    text: imagePromptText,
+    images: allImages.slice(0, MAX_TOTAL_IMAGES),
+  };
 }
